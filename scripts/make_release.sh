@@ -14,7 +14,6 @@ RBF_SRC=${RBF_SRC:-$ROOT/../donut.dodo-mister/_Other/DonutDodo_48k_v224_20260922
 MESA_SRC=${MESA_SRC:-root@192.168.20.81:/media/fat/games/gmloader/mesa}
 OUT=$ROOT/build/release/CashCowDX-MiSTer-$TAG
 rm -rf "$OUT"; mkdir -p "$OUT/_Other" "$OUT/Scripts" "$OUT/games/CashCowDX/patches" "$OUT/games/CashCowDX/mesa"
-cp "$ROOT/dist/README.md" "$OUT/"
 cp "$ROOT/dist/Scripts/CashCowDX.sh" "$OUT/Scripts/"
 cp "$ROOT/dist/games/CashCowDX/launch.sh" "$ROOT/dist/games/CashCowDX/override.cfg" "$OUT/games/CashCowDX/"
 cp "$ROOT/dist/README.md" "$OUT/games/CashCowDX/README.md"
@@ -25,6 +24,8 @@ for f in "$ROOT"/src/patches/*.gd; do cp "$f" "$OUT/games/CashCowDX/patches/"; d
 cp "$RBF_SRC" "$OUT/_Other/CashCowDX_$(basename "$RBF_SRC" .rbf | grep -oE '[0-9]{8}$').rbf"
 case "$MESA_SRC" in *:*) scp -q "$MESA_SRC/*" "$OUT/games/CashCowDX/mesa/" ;; *) cp "$MESA_SRC"/* "$OUT/games/CashCowDX/mesa/" ;; esac
 chmod +x "$OUT/Scripts/CashCowDX.sh" "$OUT/games/CashCowDX/launch.sh" "$OUT/games/CashCowDX/cashcowdx"
-( cd "$OUT" && find . -type f ! -name sha256sums.txt | sort | xargs shasum -a 256 > sha256sums.txt )
+# Checksums live inside the game folder: extracting over /media/fat must not
+# drop files into the SD root.
+( cd "$OUT" && find . -type f ! -name sha256sums.txt | sort | xargs shasum -a 256 > games/CashCowDX/sha256sums.txt )
 ( cd "$OUT" && rm -f "../CashCowDX-MiSTer-$TAG.zip" && zip -qr "../CashCowDX-MiSTer-$TAG.zip" . )
 ls -la "$ROOT/build/release/CashCowDX-MiSTer-$TAG.zip"

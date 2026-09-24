@@ -92,7 +92,14 @@ cpu_isolate() {
 		[ -n "$old" ] && [ "$old" != "2" ] || continue
 		taskset -a -p 2 "$pid" >/dev/null 2>&1 && MOVED="$MOVED $pid:$old"
 	done
-	echo "cpu: USB IRQ ${USB_IRQ:-none} -> CPU1; moved$(echo "$MOVED" | wc -w) processes to CPU1"
+	# Engine threads created after the main thread pinned itself inherited CPU0.
+	if [ -n "$engine_pid" ]; then
+		for t in /proc/$engine_pid/task/*; do
+			tid=${t##*/}
+			[ "$tid" = "$engine_pid" ] || taskset -p 2 "$tid" >/dev/null 2>&1
+		done
+	fi
+	echo "cpu: USB IRQ ${USB_IRQ:-none} -> CPU1; moved $(echo "$MOVED" | wc -w) processes and the engine's worker threads to CPU1"
 }
 cpu_restore() {
 	[ -n "$USB_IRQ" ] && [ -n "$USB_IRQ_MASK" ] && echo "$USB_IRQ_MASK" > /proc/irq/$USB_IRQ/smp_affinity 2>/dev/null
@@ -188,7 +195,7 @@ while kill -0 "$engine_pid" 2>/dev/null; do
 		kill "$engine_pid" 2>/dev/null; sleep 2; kill -9 "$engine_pid" 2>/dev/null
 		break
 	fi
-	sleep 2
+	sleep 1
 done
 wait "$engine_pid" 2>/dev/null
 echo "engine: exited ($?)"

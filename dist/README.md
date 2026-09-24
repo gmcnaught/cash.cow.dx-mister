@@ -10,7 +10,8 @@ drawn by an FPGA blitter core. Audio and the joystick go through the core as wel
 1. Extract this zip over the root of your MiSTer SD card (`/media/fat/`). It adds:
    - `_Other/CashCowDX_<date>.rbf` — the FPGA core (the shared Godot/GameMaker blitter core; its OSD shows "DonutDodo")
    - `Scripts/CashCowDX.sh` — the menu entry that starts the game
-   - `games/CashCowDX/` — the engine, its runtime and the launcher
+   - `games/CashCowDX/` — the engine, its runtime, the launcher, this README and `sha256sums.txt`
+     (verify the copy: FAT filesystems can silently truncate files on an interrupted copy)
 2. Copy **`CashCowDX.pck`** from your GOG install to `/media/fat/games/CashCowDX/CashCowDX.pck`.
    - GOG Linux installer: `data/noarch/game/CashCowDX.pck` inside the installer (e.g. extract with `innoextract`/`unzip`),
      or the file next to the game executable in an installed copy.
