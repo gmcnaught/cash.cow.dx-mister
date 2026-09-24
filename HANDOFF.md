@@ -72,7 +72,7 @@ Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script whi
 ## 6. Next steps
 
 1. **Human checks:** real controller feel/mapping through the OSD; audio by ear (music, SFX from the PCM cache); a normal play session.
-2. **Soak:** 30-minute run via the release launcher (`scripts/soak.sh`) — result in PLAN §6.20.
+2. **Soak:** done — 30 minutes clean via the release launcher (PLAN §6.20).
 3. **Scanout crop:** the core shows rows 7–230 (224 lines) of 240; decide whether that's acceptable for the HUD.
 4. **Level-load hitch:** ~0.5 s while ~1,300 nodes instantiate (one-off per level).
 5. Optional performance: PGO; direction-only enemy raycasts (needs sign-off); canvas cull (~0.9 ms).

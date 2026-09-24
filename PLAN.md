@@ -897,3 +897,16 @@ Release packaging (`dist/`, `scripts/make_release.sh <engine> <tag>` -> `build/r
 fabric gate: C_DONE must advance within 8 s, else reload core via menu.rbf and retry up to 4x; watchdog: stop the engine when another core
 is loaded); `override.cfg` loads the patch loader only (no measurement probe); README with install/pck/controls/licences. The user supplies
 `CashCowDX.pck` from the GOG release.
+
+### 6.20 Release candidate: install, smoke test, 30-minute soak (2026-09-24)
+
+Bundle `CashCowDX-MiSTer-20260924.zip` (engine `godot43rc`: all engine changes + thread pinning; optimized libmisterfabric; typed
+patches incl. pools; mem_wc 6.18.38; Mesa runtime; 40 MB) extracted over `/media/fat` on the device: 0 checksum failures; GOG pck
+`4436b750…` copied in. Zip root holds only `_Other/`, `Scripts/`, `games/`.
+Smoke test via `Scripts/CashCowDX.sh` (scripted input through `CASHCOW_JOY_BASE`): entry returns immediately (launcher detached);
+mem_wc reused; fabric bring-up ok, write-combined; main thread mask 1 (CPU0), USB IRQ on CPU1, 26 processes moved; gameplay renders
+correctly at 60 fps (`work/tier0/aj/release_smoke_big.png`); loading the menu core -> watchdog stops the engine, CPU placement and IRQ
+restored. The submit timeouts logged between the core change and the watchdog are the engine submitting to an unloaded core (poll now 1 s).
+Fix after the smoke test: engine threads created after the main thread pinned itself (inherited CPU0) are moved to CPU1 by `cpu_isolate`.
+**Soak** (`scripts/soak.sh 30`, `work/tier0/aj/soak30.txt`): 30/30 minutes engine alive and C_DONE advancing (~3,550 frames/min, ~59 fps
+against the 60 fps pacing cap), no wedge, clean exit on core change, all affinities restored (only Main_MiSTer at its own mask 2).
