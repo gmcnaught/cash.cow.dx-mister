@@ -71,7 +71,7 @@ Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script whi
 
 ## 6. Next steps
 
-1. **Human checks:** controller feel/mapping through the OSD and listening (both paths are verified objectively, PLAN §6.21); a normal play session.
+1. **Human checks:** done — user confirmed launch via Scripts → CashCowDX, audio, and controls on the release install (PLAN §6.22).
 2. **Soak:** done — 30 minutes clean via the release launcher (PLAN §6.20).
 3. **Scanout crop:** decided — keep the core's 224-line window; HUD and gameplay fully visible (PLAN §6.21).
 4. **Level-load hitch:** ~0.5 s freeze on the scene-change frame (~1,300 nodes); not a blocker, fixing it changes the game's loading (PLAN §6.21).

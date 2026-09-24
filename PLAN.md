@@ -931,3 +931,9 @@ game's scene change instantiates the level (`level_01.tscn` + 1,291 nodes incl. 
 the game itself performs synchronously (no threaded loading in the game's code); the picture holds the previous frame for ~0.5 s, no
 gameplay frame is affected and no input is lost (the next frame runs 1 physics tick). Reducing it would mean changing how the game
 loads levels (threaded `ResourceLoader`, deferred gold spawning) — a game-behaviour change, left out.
+
+### 6.22 Human release check (2026-09-24)
+
+User-verified on the device with the release install: the game loads via **Scripts → CashCowDX**; audio plays correctly; game
+controls work as expected. This closes the human checks left open in §6.21 (controller feel/mapping, listening). Release candidate
+`CashCowDX-MiSTer-20260924.zip` (§6.20) has no open blockers.
