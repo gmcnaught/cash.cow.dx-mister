@@ -52,5 +52,7 @@ Unused R**. Default map on an unmapped pad: bottom face = Jump/OK, right face = 
 ## Credits and licences
 
 - Cash Cow DX © its developers; not distributed here.
+- This port: GPL-3.0, source at https://github.com/gmcnaught/cash.cow.dx-mister (see `LICENSING.md` there for exceptions).
+- `MiSTer_CashCowDX`: MiSTer-devel/Main_MiSTer (GPL-3.0) plus this port's hook.
 - Godot Engine 4.3 (MIT) with MiSTer changes; Mesa, libdrm (MIT); libtinfo (ncurses licence).
 - `mem_wc` driver: GPL-2.0, from skmp/minicast (source in the port's repository under `tools/mem_wc/`).
