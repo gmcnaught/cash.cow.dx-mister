@@ -7,14 +7,36 @@ extends "res://ui/pickup_score/pickup_score_manager.gd"
 # swap and the VISUAL_TICK adapter to them. A popup whose swap did not happen
 # (MISTER_PATCHES_SKIP=pool_score) is not tracked and frees itself as before.
 # Grow on demand (a spawn is never dropped); at most POOL_MAX parked popups are
-# kept, extra ones free themselves. No pre-warm: a popup's _ready calls
-# randf_range, and pre-warming would shift the global RNG sequence.
+# kept, extra ones free themselves. PREWARM popups are created when the level
+# loads (a pool miss mid-play cost ~9 ms of physics: Label instantiate + theme
+# resolution; PLAN §6.25). A pre-warmed popup skips its _ready initializer (the
+# `_prewarming` flag below), so pre-warming consumes no randf_range and the global
+# RNG sequence is unchanged; it gets the initializer on first use like any reuse.
 # Reuse moves the popup to the last child so draw order stays newest-on-top.
 
 const POOL_MAX := 16
+const PREWARM := 8
 
 var _free: Array = [] # Parked popups (pickup_score_pool.gd).
 var _size0 := Vector2(-1.0, -1.0) # Scene size of a fresh popup (32x8).
+var _prewarming := false # Read by pickup_score_pool.gd's _ready.
+
+
+func _ready() -> void:
+	super()
+	_prewarming = true
+	for i in PREWARM:
+		var s: Label = pickup_score.instantiate()
+		if _size0.x < 0.0:
+			_size0 = s.get_size()
+		add_child(s)
+		if not s.has_method(&"_pool_reuse"):
+			s.queue_free() # Swap did not happen (MISTER_PATCHES_SKIP=pool_score).
+			break
+		s._pool_owner = self
+		s._pool_park()
+		_free.push_back(s)
+	_prewarming = false
 
 
 func spawn_pickup_score(pickup_position: Vector2, pickup_value: int) -> void:

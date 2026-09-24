@@ -59,6 +59,8 @@ class DisplayServerMister : public DisplayServerHeadless {
 	void _init_ddr();
 	void _present();
 
+	VSyncMode vsync_mode = VSYNC_ENABLED;
+
 public:
 	String get_name() const override { return "mister"; }
 
@@ -67,6 +69,13 @@ public:
 	Rect2i screen_get_usable_rect(int p_screen = SCREEN_OF_MAIN_WINDOW) const override { return Rect2i(Point2i(), size); }
 	int screen_get_dpi(int p_screen = SCREEN_OF_MAIN_WINDOW) const override { return 96; }
 	float screen_get_refresh_rate(int p_screen = SCREEN_OF_MAIN_WINDOW) const override { return 60.0; }
+
+	// V-Sync drives the fabric's frame pacing (libmisterfabric): enabled,
+	// adaptive and mailbox wait for the core's scanout boundary (the core
+	// snapshots whole frames, so there is no tearing to trade against);
+	// disabled caps at the scanout rate on the wall clock without waiting for it.
+	void window_set_vsync_mode(VSyncMode p_vsync_mode, WindowID p_window = MAIN_WINDOW_ID) override;
+	VSyncMode window_get_vsync_mode(WindowID p_window = MAIN_WINDOW_ID) const override { return vsync_mode; }
 
 	Size2i window_get_size(WindowID p_window = MAIN_WINDOW_ID) const override { return size; }
 	Size2i window_get_size_with_decorations(WindowID p_window = MAIN_WINDOW_ID) const override { return size; }

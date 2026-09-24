@@ -38,7 +38,8 @@ func _ready() -> void:
 			stage_clear_effect, loudspeaker_kill_effect]:
 		_pools[scene] = []
 	_prewarm(walk_effect, 3)
-	_prewarm(gold_pickup_effect, 4)
+	_prewarm(gold_pickup_effect, 6)
+	_prewarm(mega_gold_pickup_effect, 3)
 	_prewarm(jump_effect_directional, 2)
 	_prewarm(jump_effect_static, 2)
 	_prewarm(drop_effect, 2)

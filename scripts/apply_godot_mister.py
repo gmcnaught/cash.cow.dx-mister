@@ -606,3 +606,31 @@ edit(RC, "c->type != Item::Command::TYPE_POLYGON && // MISTER",
      '\t\t\t\tc->type != Item::Command::TYPE_CLIP_IGNORE && c->type != Item::Command::TYPE_ANIMATION_SLICE &&\n'
      '\t\t\t\tc->type != Item::Command::TYPE_POLYGON && // MISTER: drawn by emit_polygon\n'
      '\t\t\t\ttrue) {\n\t\t\tMisterFabricBridge::note_unhandled(int(c->type));\n')
+
+# ---- MISTER_FRAMELOG: per-frame timing log (measurement only; off unless the env is set) ----
+MM = "main/main.cpp"
+edit(MM, '#include "main/mister_framelog.h"',
+     '#include "main.h"\n',
+     '#include "main.h"\n#include "main/mister_framelog.h"\n')
+edit(MM, "MisterFramelog::begin()",
+     '\tconst uint64_t ticks = OS::get_singleton()->get_ticks_usec();\n\tEngine::get_singleton()->_frame_ticks = ticks;\n',
+     '\tMisterFramelog::begin();\n'
+     '\tconst uint64_t ticks = OS::get_singleton()->get_ticks_usec();\n\tEngine::get_singleton()->_frame_ticks = ticks;\n')
+edit(MM, "MisterFramelog::mark_physics",
+     '\tif (Input::get_singleton()->is_agile_input_event_flushing()) {\n\t\tInput::get_singleton()->flush_buffered_events();\n\t}\n\n\tuint64_t process_begin',
+     '\tMisterFramelog::mark_physics(advance.physics_steps);\n'
+     '\tif (Input::get_singleton()->is_agile_input_event_flushing()) {\n\t\tInput::get_singleton()->flush_buffered_events();\n\t}\n\n\tuint64_t process_begin')
+edit(MM, "MisterFramelog::mark_process",
+     '\tmessage_queue->flush();\n\n\tRenderingServer::get_singleton()->sync(); //sync if still drawing from previous frames.\n',
+     '\tmessage_queue->flush();\n\tMisterFramelog::mark_process();\n\n\tRenderingServer::get_singleton()->sync(); //sync if still drawing from previous frames.\n')
+edit(MM, "MisterFramelog::mark_draw",
+     '\tprocess_ticks = OS::get_singleton()->get_ticks_usec() - process_begin;\n',
+     '\tMisterFramelog::mark_draw();\n\tprocess_ticks = OS::get_singleton()->get_ticks_usec() - process_begin;\n')
+edit(MM, "MisterFramelog::mark_tail",
+     '\tOS::get_singleton()->add_frame_delay(DisplayServer::get_singleton()->window_can_draw());\n',
+     '\tMisterFramelog::mark_tail();\n'
+     '\tOS::get_singleton()->add_frame_delay(DisplayServer::get_singleton()->window_can_draw());\n'
+     '\tif (MisterFramelog::enabled) {\n'
+     '\t\tSceneTree *mf_tree = Object::cast_to<SceneTree>(OS::get_singleton()->get_main_loop());\n'
+     '\t\tMisterFramelog::end(mf_tree ? mf_tree->get_node_count() : 0);\n'
+     '\t}\n')

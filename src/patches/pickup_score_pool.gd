@@ -20,6 +20,9 @@ var _yellow := false # font_color override present.
 func _ready() -> void:
 	_speed0 = speed # Before initialize_score() scales it.
 	_mode0 = get_process_mode()
+	var p := get_parent()
+	if p != null and p.get(&"_prewarming") == true:
+		return # Pre-warmed and parked by the manager: no initializer, no randf_range.
 	super()
 
 

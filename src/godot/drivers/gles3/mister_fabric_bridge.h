@@ -49,6 +49,8 @@ void note_unhandled(int p_command_type);
 
 // Close the frame: submit to the fabric, pace to scanout, print stats.
 void present();
+// Frame pacing (from the V-Sync mode): 0 = scanout counter, 1 = wall clock, 2 = none.
+void set_pacing(int p_mode);
 
 } // namespace MisterFabricBridge
 

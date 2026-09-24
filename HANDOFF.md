@@ -6,9 +6,10 @@ Repo: private `github.com/gmcnaught/cash.cow.dx-mister`. `work/`, `gamedata/`, `
 ## 1. State
 
 Godot 4.3 Cash Cow DX runs on the DE10-Nano with the FPGA blitter drawing every frame, DDR audio, and the MiSTer joystick.
-Real gameplay (scripted input, Godot's default 8 physics steps/frame) runs at a ~59–60 fps per-second mean; the main thread
-costs ~11 ms/frame of the 16.7 ms budget. The remaining dips were CPU placement (USB IRQs, the audio thread and other ports'
-polling daemons sharing CPU0 with the main thread); the release launcher isolates CPU0 for the main thread (PLAN §6.18).
+Real gameplay (scripted input, Godot's default 8 physics steps/frame): the main thread costs ~11 ms/frame of the 16.7 ms budget.
+Frames are paced by libmisterfabric on the core's scanout frame counter (Godot V-Sync mode -> `mf_set_pacing`; `--max-fps 0`), so
+every published frame is displayed; the launcher isolates CPU0 for the main thread, itself included (PLAN §6.18, §6.25).
+Stutter target (≥58 displayed fps per second, ≤58 at most once per 30 s) measured with `scripts/stutter/` — PLAN §6.25.
 Every canvas command type the game uses now reaches the fabric (rects, split large rects, polygons; `unhandled: none`).
 A release bundle (`scripts/make_release.sh`) ships a CashCowDX-branded core (`_Other/CashCowDX_*.rbf`, CORENAME `CashCowDX`, Cash Cow
 button labels). Loading it from the core list starts the game with no daemon: MiSTer.ini `[CashCowDX] main=` (set by
@@ -26,6 +27,8 @@ while this core is loaded; it starts `launch.sh`. The user supplies the GOG `Cas
 | `--render-thread separate` is slower on the fabric path | PLAN §6.5 |
 | GDScript inline property cache: kept but OFF (`MISTER_GD_CACHE=1`); no measured gain, one spiral seen with it | PLAN §6.16 |
 | mem_wc: load if absent, **never rmmod** | `tools/mem_wc/README.md` |
+| One frame pacer: the scanout counter (not Godot's limiter, not a wall clock); success is counted in *displayed* frames | PLAN §6.25 |
+| Pass/fail stutter runs use `PERF_ON=0`; the perf trace perturbs the device (tmpfs memory, SD I/O) | PLAN §6.25 |
 | Core RBF: maldita.castilla-mister `build-rbf.yml` `core_variant=cashcow` (same RTL as DonutDodo); next time prefer shared RBF + MRA | PLAN §6.23 |
 
 ## 3. Layout
@@ -41,6 +44,7 @@ tools/mem_wc/                     write-combining /dev/mem driver: build.sh for 
 dist/                             Scripts/{CashCowDX.sh,CashCowDX_CoresMenu.sh}, games/CashCowDX/{launch.sh,override.cfg}, README.md
 tools/mister-wrapper/             build-hps.sh (upstream Main_MiSTer + overlay/ + one inserted call -> MiSTer_CashCowDX)
 scripts/make_release.sh           assembles build/release/CashCowDX-MiSTer-<tag>.zip (RBF_SRC=<cashcow-variant RBF> required)
+scripts/stutter/                  run.sh (device capture of the installed release), frames.py (analysis), state_probe.gd
 scripts/ (measurement)            ab_play.sh, perf_stat_play.sh, spike_probe.gd, cpu_isolate.sh, soak.sh, joy_inject.py,
                                   tier0_probe.gd, godot_dbg_profile.py, profile_summary.py, sfx_bench.gd, gd_access_bench.gd,
                                   named_cache_test.gd, sfx_hash.gd
@@ -73,6 +77,10 @@ Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script whi
 - Measurement: `PATCH=1 MISTER_SEED=1 MISTER_PATCHES_DIR=.../patches_typed ./ab_play.sh <engine> <tag> <steps>`; add `SPIKES=1` for
   per-frame spike logging; `./perf_stat_play.sh <engine> <tag> 1` for main-thread cycles/frame (the probe's cpu_ms is both cores).
 - Scripted input: engine with `MISTER_JOY_BASE=0x3A0C0000` (release: `CASHCOW_JOY_BASE`), then `joy_inject.py "<steps>"`.
+- Stutter capture: copy `scripts/stutter/` to `/media/fat/games/cashcow/stutter/`, then
+  `PERF_ON=0 ./run.sh <tag> 600 [engine]` (add `PROF=1` for main-thread sampling, `EXTRA_ENV="export K=V"` for knobs); pull
+  `/media/fat/logs/CashCowDX/stutter/<tag>/` and run `scripts/stutter/frames.py <dir>`. Engines need `MISTER_FRAMELOG` support (≥ godot43fl).
+- `/media/fat` is mounted **sync**: every write there is a synchronous SD write — keep per-frame/per-second output in /tmp.
 - Never run two measurement loops at once (they kill each other's engines); never `rmmod mem_wc`.
 
 ## 6. Next steps

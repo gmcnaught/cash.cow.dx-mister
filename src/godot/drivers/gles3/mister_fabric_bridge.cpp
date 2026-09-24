@@ -12,6 +12,7 @@
 /**************************************************************************/
 
 #include "mister_fabric_bridge.h"
+#include "main/mister_framelog.h"
 
 #ifdef GLES3_ENABLED
 
@@ -50,6 +51,9 @@ void (*p_draw)(const MFVtx *, int, const uint8_t *, int, int, int, int, uint32_t
 void (*p_present)() = nullptr;
 void (*p_tex_invalidate)(uint32_t) = nullptr;
 const uint8_t *(*p_sw_frame)(int *, int *) = nullptr;
+uint64_t (*p_pace_sleep_ns)() = nullptr; // optional
+uint32_t (*p_scan_count)() = nullptr; // optional
+void (*p_set_pacing)(int) = nullptr; // optional
 
 struct TexEntry {
 	Vector<uint8_t> rgba;
@@ -168,6 +172,9 @@ bool init() {
 	if (!ok) {
 		return false;
 	}
+	p_pace_sleep_ns = (uint64_t(*)())dlsym(lib, "mf_pace_sleep_ns");
+	p_scan_count = (uint32_t(*)())dlsym(lib, "mf_scan_count");
+	p_set_pacing = (void (*)(int))dlsym(lib, "mf_set_pacing");
 	if (p_abi_version() != MF_ABI_VERSION) {
 		ERR_PRINT(vformat("MiSTer fabric: ABI %d, expected %d.", p_abi_version(), MF_ABI_VERSION));
 		return false;
@@ -487,6 +494,12 @@ void emit_polygon(const float p_world[6], uint64_t p_polygon_id, const float p_m
 	stats.polygons++;
 }
 
+void set_pacing(int p_mode) {
+	if (active && p_set_pacing) {
+		p_set_pacing(p_mode);
+	}
+}
+
 void note_unhandled(int p_command_type) {
 	stats.unhandled[p_command_type & 15]++;
 }
@@ -495,7 +508,16 @@ void present() {
 	if (!active) {
 		return;
 	}
+	const uint64_t mf_t = MisterFramelog::enabled ? MisterFramelog::now_us() : 0;
+	const uint64_t mf_pace = (MisterFramelog::enabled && p_pace_sleep_ns) ? p_pace_sleep_ns() : 0;
 	p_present();
+	if (MisterFramelog::enabled) {
+		MisterFramelog::present_us += MisterFramelog::now_us() - mf_t;
+		if (p_pace_sleep_ns) {
+			MisterFramelog::pace_us += (p_pace_sleep_ns() - mf_pace) / 1000;
+		}
+		MisterFramelog::scan = p_scan_count ? p_scan_count() : 0;
+	}
 	frame_no++;
 	cleared_this_frame = false;
 

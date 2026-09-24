@@ -44,6 +44,12 @@ void mf_draw(const MFVtx *verts, int tri_count, const uint8_t *rgba, int w, int 
 void mf_present(void);
 /* Forget any staged copy of texture `key` (re-upload or delete). */
 void mf_tex_invalidate(uint32_t key);
+/* Optional: cumulative frame-pacing sleep inside mf_present, in ns. */
+uint64_t mf_pace_sleep_ns(void);
+/* Optional: the core's scanout frame counter (+1 per scanout frame), 0 if unavailable. */
+uint32_t mf_scan_count(void);
+/* Optional: 0 = pace on the scanout counter, 1 = wall clock at the scanout rate, 2 = none. */
+void mf_set_pacing(int mode);
 /* SW back-end only: the RGBA8888 frame it rendered (NULL on mfgpu). */
 const uint8_t *mf_sw_frame(int *w, int *h);
 /* Quiesce the fabric for the next engine (also runs atexit). */

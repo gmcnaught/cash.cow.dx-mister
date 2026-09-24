@@ -984,3 +984,68 @@ restored; menu -> game, NES -> game, repeat: 1/1 each time; same core reloaded o
 the running engine continues (C_DONE advancing); disarmed load: stock Main, 0 engines; disarmed Scripts entry: 1/1; re-arm re-enables
 the commented line (one `[CashCowDX]` section). Not tested: OSD and a real controller under MiSTer_CashCowDX (needs a person);
 MGL `setname` on the shared RBF selecting the `[CashCowDX]` section. Device left armed, game running.
+
+### 6.25 Gameplay stutter: harness, launcher on CPU0, scanout pacing (2026-09-24)
+
+Target (user): in active gameplay never below 58 fps, and 58 fps no more than once per 30 s.
+**Harness** (`scripts/stutter/`): `run.sh <tag> [s] [engine]` on the device runs the *installed release* through its real launcher
+(CPU isolation, pinning, mem_wc) with scripted input, plus: engine `MISTER_FRAMELOG` (new, `main/mister_framelog.*`: one 64-byte record
+per `Main::iteration` — CLOCK_MONOTONIC start, gap/physics/process/draw/tail/limiter-delay, fabric present and its pacing wait,
+main-thread CPU time, voluntary/involuntary context switches, faults, CPU, node count, core scanout counter after the publish; written to
+tmpfs in 128-record blocks; off = one branch); `state_probe.gd` (GameManager state + scene instantiations keyed by frame index); optional
+CPU0 `perf` trace (sched_switch, IRQs, softirqs, `-k mono`, aligned with the frame log; `PERF_ON=0` skips it) and `PROF=1` main-thread
+sampling; 1 Hz /proc samples. `EXTRA_ENV` passes A/B knobs through `/tmp/cashcowdx_test.env` (a hook `launch.sh` now sources).
+`frames.py <dir>`: active gameplay = LEVEL_ACTIVE/LEVEL_SHAKE/BONUS_LEVEL/BOSS_FIGHT; presented fps per 1-s window (and worst sliding
+window); **displayed** new frames per 60 scanout frames (from the logged scanout counter); each long frame attributed to a phase, a
+CPU0 preemptor or an IRQ. Measurement lessons: the perf trace in tmpfs grows ~0.5 MB/s and its memory pressure (kswapd, page-cache
+eviction, SD reads) perturbs the run — pass/fail runs use `PERF_ON=0`; `/media/fat` is mounted **sync**, so every harness append and
+every engine print was a synchronous SD write (dw-mci ~540 IRQ/s on CPU0; the probe's prints blocked the main thread) — the harness
+now writes to /tmp and copies at the end.
+**Finding 1 — the launcher itself ran on CPU0.** `cpu_isolate` skipped its own pid, so `launch.sh` and the `cat`/`sleep`/subshell
+it forks every second stayed on CPU0 next to the main thread: in `base1` they took 2.1 s of CPU0 inside long frames (plus SD-read
+kworkers from re-exec'ing binaries). Fix: the launcher moves itself to CPU1 in `cpu_isolate`; the watchdog reads CORENAME with the
+`read` builtin. `base1` -> `fix1`: 60-fps windows 44/83 -> 104/128.
+**Finding 2 — engine prints on a sync mount.** Engine stdout/stderr now goes through a pipe to a `cat` logger (moved to CPU1), so a
+print never blocks the main thread on an SD write.
+**Finding 3 — two pacers, neither on the scanout.** Godot's limiter (`--max-fps 60`, 16,666 us, keeps 1 frame of debt) and
+libmisterfabric's `pace()` (59.92 Hz wall clock, keeps 4) both slept (71% / 28% of frames, both in 12%), and neither followed the core's
+scanout (59.9228 Hz). The presented-frame count hid the damage: with the old pacing (`pacA`, 207 s active) presented fps looked
+nearly clean (one window at 56) but **displayed** new frames per 60 scanout frames had 8 windows < 58 (down to 52) and 66 repeated
+scanout frames, and 67 frames were overwritten before any snapshot (two publishes inside one scanout frame).
+Fix: one pacer, on the core's own scanout counter (`scan_frame_cnt` at 0x3BFB0018, +1 per scanout frame, published by
+`openbor_video_reader` in every build; verified +1 per 16.7 ms with no engine running). The MiSTer_fb IRQ was not used: it is
+`HDMI_TX_VS` (`sys_top.v` f2h_irq[0]), the scaler's output timing, not the scanout that snapshots WORK. `mf_present` now waits,
+*before* publishing, for the first boundary at least 3 ms (fabric margin) after the previous publish — the boundary that snapshots the
+previous frame — so a frame is never overwritten unseen and the engine's CPU work overlaps the wait (a single frame of up to ~30 ms
+costs no displayed frame if the next is short: a one-frame debt allowance without a counter). Boundary times: last observed counter
+change + the core-reported period; the counter read is authoritative; a 50 ms stall falls back to the wall clock (fires at teardown,
+when the core changes). `--max-fps 0` in the launcher. Pacing follows Godot's V-Sync mode (`DisplayServerMister::window_set_vsync_mode`
+-> optional `mf_set_pacing`): enabled/adaptive/mailbox = scanout counter, disabled = wall clock at the scanout rate;
+`MISTER_FABRIC_PACE=scanout|timer|off` overrides for measurement.
+A/B (`PERF_ON=0`, 600 s each, same engine `fl3`): `pacA` (old) displayed <58: 8 windows, <=58 1.69/30 s, 66 repeats / 11,700
+scanout frames — FAIL; `pacB` (scanout) displayed <58: 0, <=58 0.14/30 s (one window at 58), 6 repeats / 12,720 — PASS; presented
+fps: no window < 58, worst sliding window 58.
+Correction: `pacB` alone did not establish a pass — the same config failed in `vs1` (3 displayed windows at 57), `vs2` (one at 57),
+`prof1` (one at 56); `prof2` passed. Game content varies run to run (the game's RNG is unseeded).
+**Finding 4 — pool misses.** Main-thread profile of the long frames (`PROF=1`, `perf -e cpu-clock -k mono`; the hardware `cycles`
+event rejects `-k mono`): +7.5 ms of physics per long frame, diffuse (instantiate/add_child/theme: `ThemeDB::get_native_type_dependencies`,
+HashMap/CowData/StringName, malloc). Over 5 runs, frames that instantiated `pickup_score.tscn` (the "+N" Label) averaged 14.8 ms of
+physics vs 5.35 ms (102 of 314 > 16 ms); effect instantiations +5.5 ms; together 126 of the 264 physics frames > 16 ms. The pools
+(§6.12) grow on demand and are rebuilt per level (the managers live in the level scenes), and the score pool had no pre-warm (its
+`_ready` calls `randf_range`). Fix: `pickup_score_manager_pool.gd` pre-warms 8 popups at level load; a pre-warmed popup skips its
+`_ready` initializer (manager flag `_prewarming`), so pre-warming consumes no RNG and a popup's first use runs the initializer like
+any reuse; `effect_manager_pool.gd` pre-warms `gold_pickup_effect` 6 (was 4) and `mega_gold_pickup_effect` 3. The cost moves to the
+level-load frame (already ~0.5 s, outside active play). `pw1` (600 s, 319 s active): all pickup/effect instantiations at LEVEL_INTRO
+or GAME_OVER; active physics p99.9 11.9 ms, max 16.3 ms, 1 frame > 16 ms; **displayed: 293/293 windows at 60, 0 repeated scanout
+frames**; presented: 286 at 60, 8 at 59.
+**Harness input.** Deaths are `PLAYER_HURT` -> `LEVEL_PAUSE`; the fixed joy_inject loop idled on the title / high-score initials
+screens after the third death, so only 30–35% of a run was play. `joy_drive.py` follows the STATE lines (random play when active;
+after 2 s of GAME_OVER: OK x5, start, OK x4, re-checked) and `state_probe.gd` keeps lives at `MISTER_TEST_LIVES` (harness default 99,
+`LIVES=0` = the game's own) — measurement only, never shipped.
+**Result** (release install on .81: engine `godot43vs`, `fabric_opt` = scanout pacer, launcher with self-pinning + logger pipe +
+`--max-fps 0`, patches with pre-warm; `PERF_ON=0`, 99 lives, `joy_drive.py`; STATE lines now go to a flushed tmpfs file because the
+engine's stdout is block-buffered in release): `lv1` 448 s active — displayed 417/417 windows at 60, **0 repeated scanout frames** of
+25,020, presented 0 windows < 59, longest frame period 23.4 ms; `lv2` 460 s active — 431/431 at 60, 0 repeats of 25,860, longest
+26.4 ms. With `pw1` (normal lives, 319 s): 1,227 s of active gameplay, 1,141 displayed windows, all 60; the ≥58 / ≤58-once-per-30-s
+target is met with margin. (Presented 1-s windows show 59 about 3% of the time: the scanout runs at 59.9228 Hz, so a wall-clock second
+holds 59 or 60 frames.)

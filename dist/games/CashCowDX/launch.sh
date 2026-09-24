@@ -35,6 +35,9 @@ MAX_RETRIES=4
 nap() { sleep "$1" & wait $!; }
 
 mkdir -p "$LOGDIR" "$GAMEDIR/data"
+# Measurement hook (scripts/stutter/): extra env for the engine, e.g. MISTER_FRAMELOG.
+# In /tmp, so it never survives a reboot.
+[ -f /tmp/cashcowdx_test.env ] && . /tmp/cashcowdx_test.env
 cd "$GAMEDIR" || exit 1
 
 # Only on our core (e.g. a Scripts run racing a core change).
@@ -96,6 +99,9 @@ USB_IRQ_MASK=""
 MOVED=""
 cpu_isolate() {
 	[ -n "$USB_IRQ" ] && echo 2 > /proc/irq/$USB_IRQ/smp_affinity 2>/dev/null
+	# This launcher too: its watchdog loop forks every second, and each fork on
+	# CPU0 preempted the main thread (stutter capture base1, PLAN §6.25).
+	taskset -p 2 $$ >/dev/null 2>&1
 	for pid in $(ls /proc | grep -E '^[0-9]+$'); do
 		[ "$pid" = "$$" ] && continue
 		readlink /proc/$pid/exe >/dev/null 2>&1 || continue      # kernel threads
@@ -152,9 +158,15 @@ export GODOT_SILENCE_ROOT_WARNING=1
 export XDG_DATA_HOME="$GAMEDIR/data"
 export XDG_CONFIG_HOME="$GAMEDIR/data"
 
+# Frame pacing: libmisterfabric paces on the core's scanout frame counter
+# (MISTER_FABRIC_PACE=scanout), so Godot's own limiter is off (--max-fps 0);
+# two pacers at 60.00 and ~59.92 Hz drifted against the scanout (PLAN §6.25).
 start_engine() {
+	# Engine output goes through a pipe to a logger process (moved to CPU1 with the
+	# rest): /media/fat is mounted sync, so a print written straight to the log
+	# would block the main thread on an SD write (PLAN §6.25).
 	taskset 2 ./$ENGINE --display-driver mister --rendering-driver opengl3_es --audio-driver MiSTer \
-		--max-fps 60 --main-pack CashCowDX.pck &
+		--max-fps "${CASHCOW_MAX_FPS:-0}" --main-pack CashCowDX.pck > >(exec cat) 2>&1 &
 	engine_pid=$!
 	echo "engine: started pid $engine_pid"
 }
@@ -213,8 +225,9 @@ rm -f "$RETRY_MARK"
 
 # --- watchdog: another core loaded from the OSD -> stop the engine ---------------
 while kill -0 "$engine_pid" 2>/dev/null; do
-	if [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$CORENAME" ]; then
-		echo "watchdog: core changed to '$(cat /tmp/CORENAME 2>/dev/null)' — stopping the engine"
+	cur=""; read -r cur < /tmp/CORENAME 2>/dev/null
+	if [ "$cur" != "$CORENAME" ]; then
+		echo "watchdog: core changed to '$cur' — stopping the engine"
 		kill "$engine_pid" 2>/dev/null; nap 2; kill -9 "$engine_pid" 2>/dev/null
 		break
 	fi

@@ -65,7 +65,13 @@ DisplayServer *DisplayServerMister::create_func(const String &p_rendering_driver
 		memdelete(ds);
 		return nullptr;
 	}
+	ds->window_set_vsync_mode(p_vsync_mode); // project setting / --disable-vsync
 	return ds;
+}
+
+void DisplayServerMister::window_set_vsync_mode(VSyncMode p_vsync_mode, WindowID p_window) {
+	vsync_mode = p_vsync_mode;
+	MisterFabricBridge::set_pacing(p_vsync_mode == VSYNC_DISABLED ? 1 : 0);
 }
 
 void DisplayServerMister::register_mister_driver() {
