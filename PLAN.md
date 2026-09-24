@@ -926,3 +926,8 @@ every scripted run exercised (only the base address differs). Feel and preferred
 0.2%) — sound is being played. Content: RMS 11,211 (~-9 dBFS), 1.8% of samples at full scale. Godot clamps the float mix to +/-1.0 and
 scales to 31 bits (`audio_server.cpp:302-310`), and the driver's `>> 16` maps that to exactly +32767/-32768, so the path is unity gain;
 the full-scale samples are the game's own mix hitting Godot's standard clamp, as on PC. Listening remains a human check.
+**Level-load hitch — not a release blocker.** `work/tier0/aj/spikes_all.txt`: the 445–562 ms frames are the single frame in which the
+game's scene change instantiates the level (`level_01.tscn` + 1,291 nodes incl. 171 gold, `title_panel`), i.e. at a screen transition
+the game itself performs synchronously (no threaded loading in the game's code); the picture holds the previous frame for ~0.5 s, no
+gameplay frame is affected and no input is lost (the next frame runs 1 physics tick). Reducing it would mean changing how the game
+loads levels (threaded `ResourceLoader`, deferred gold spawning) — a game-behaviour change, left out.

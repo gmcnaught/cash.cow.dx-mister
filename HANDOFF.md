@@ -74,7 +74,7 @@ Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script whi
 1. **Human checks:** controller feel/mapping through the OSD and listening (both paths are verified objectively, PLAN §6.21); a normal play session.
 2. **Soak:** done — 30 minutes clean via the release launcher (PLAN §6.20).
 3. **Scanout crop:** decided — keep the core's 224-line window; HUD and gameplay fully visible (PLAN §6.21).
-4. **Level-load hitch:** ~0.5 s while ~1,300 nodes instantiate (one-off per level).
+4. **Level-load hitch:** ~0.5 s freeze on the scene-change frame (~1,300 nodes); not a blocker, fixing it changes the game's loading (PLAN §6.21).
 5. Optional performance: PGO; direction-only enemy raycasts (needs sign-off); canvas cull (~0.9 ms).
 
 ## 7. Known risks
