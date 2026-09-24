@@ -52,6 +52,13 @@ var _visual_on := false
 var _visual: Array[Node] = []
 
 
+# Releases ship the patches as binary tokens (x.gdc, make_release.sh); the
+# dev/measurement dirs keep the text sources.
+func _load_patch(file: String) -> Script:
+	var gdc := _dir + file.get_basename() + ".gdc"
+	return load(gdc if FileAccess.file_exists(gdc) else _dir + file)
+
+
 func _enter_tree() -> void:
 	var sd := OS.get_environment("MISTER_SEED")
 	if sd != "":
@@ -66,11 +73,11 @@ func _enter_tree() -> void:
 		if not skip.has(key):
 			var e: Array = SCENE_PATCHES[key]
 			for i in range(0, e.size(), 2):
-				_by_path[e[i]] = load(_dir + e[i + 1])
+				_by_path[e[i]] = _load_patch(e[i + 1])
 	if not skip.has("input"):
 		var gi := get_node_or_null("/root/GameInput")
 		if gi != null and gi.get_script() != null and gi.get_script().resource_path == INPUT_ORIG:
-			gi.set_script(load(_dir + "game_input_flat.gd"))
+			gi.set_script(_load_patch("game_input_flat.gd"))
 			print("MisterPatches: game_input_flat active")
 	_visual_on = not skip.has("visual")
 	process_priority = -1000 # Before the level's own _process callbacks.

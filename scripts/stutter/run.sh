@@ -32,7 +32,8 @@ restore() {
 }
 trap restore EXIT
 cp "$(dirname "$0")/state_probe.gd" "$G/state_probe.gd"
-printf '[autoload]\n\nMisterPatches="*%s/patches/mister_patches.gd"\nStateProbe="*%s/state_probe.gd"\n' "$G" "$G" > "$G/override.cfg"
+MP="$G/patches/mister_patches.gdc"; [ -f "$MP" ] || MP="$G/patches/mister_patches.gd"   # releases ship .gdc
+printf '[autoload]\n\nMisterPatches="*%s"\nStateProbe="*%s/state_probe.gd"\n' "$MP" "$G" > "$G/override.cfg"
 cat > /tmp/cashcowdx_test.env <<EOF
 export CASHCOW_JOY_BASE=0x3A0C0000
 export MISTER_FRAMELOG=/tmp/cc_frames.bin

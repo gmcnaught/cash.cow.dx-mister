@@ -1049,3 +1049,99 @@ engine's stdout is block-buffered in release): `lv1` 448 s active — displayed 
 26.4 ms. With `pw1` (normal lives, 319 s): 1,227 s of active gameplay, 1,141 displayed windows, all 60; the ≥58 / ≤58-once-per-30-s
 target is met with margin. (Presented 1-s windows show 59 about 3% of the time: the scanout runs at 59.9228 Hz, so a wall-clock second
 holds 59 or 60 frames.)
+
+### 6.26 Boot time: PCM cache off the loading thread, boot timeline (2026-09-24)
+**Change** (`scripts/apply_godot_mister.py`, build `godot43pa`): the §6.2 step-2 PCM decode of short clips now runs as one
+low-priority `WorkerThreadPool` task per stream (pool threads stay on CPU1). Playbacks stream through the shared setup until the task
+publishes the cache (`SafeFlag pcm_ready`). The task holds a stream reference until it has published; `set_packet_sequence` and the
+destructor reclaim the task. `MISTER_OGG_PCM_ASYNC=0` = the old inline decode. 65 clips qualify (not 45: jingles ≤ 3 s too); all are
+decoded 0.3–0.4 s after the first frame, ~5.5 s before the attract panel.
+**Boot log**: `MISTER_BOOTLOG=<file>` writes CLOCK_MONOTONIC lines for Main's startup phases (the benchmark marks, TOOLS-only
+upstream), every `ResourceLoader::_load` (depth, ms, path) and each PCM task. Harness `scripts/boot/`: `boot_time.sh <tag> cold|warm
+[engine]` loads the RBF from the menu core exactly like the OSD (main= starts the launcher), samples `/proc` at ~6 Hz, optional
+`PERF=1`; `boot_report.py` (timeline), `load_self.py` (self time per resource type), `boot_prof.py` (main-thread samples per phase).
+
+| From `load_core` (s) | `vs` warm | `pa` sync warm (2 runs) | `pa` async warm (2 runs) | `vs` cold | `pa` async cold |
+|---|---|---|---|---|---|
+| engine exec | 2.10 | 2.10 / 2.22 | 2.24 / 2.13 | 2.57 | 2.47 |
+| Load Autoloads (duration) | — | 4.21 / 4.21 | **2.70 / 2.67** | — | 3.24 |
+| first frame | 14.53 | 14.03 / 14.08 | **12.93 / 12.71** | 19.53 | 17.15 |
+| attract panel | 20.42 | 19.78 / 19.84 | **18.86 / 18.63** | 25.44 | 22.89 |
+
+Where the warm boot goes (`pa_async_warm`; main thread 90–93% busy on CPU0 in every load phase, so boot is main-thread CPU bound):
+
+| Phase | s | Cause |
+|---|---|---|
+| core load | 0.65 | RBF load by MiSTer |
+| launch.sh | ~1.4 | includes the unconditional `nap 1` after the FPGA-ready loop (the FPGA is already ready) |
+| Main::Setup/Setup2 | 2.7 | Servers 1.2, Scene 1.0; `basisu_transcoder_init` 0.35 s CPU (the game has no Basis textures: all ctex are WebP) |
+| Load Autoloads | 2.7 | GameManager.gdc 0.6 s self; 80 music streams 1.6 s (header parse + shared codebook build at load, `vorbis_book_init_decode`) |
+| Load Game (game.scn) | 3.6 | `bezel.png` WebP decode 0.94 s; HUD/pause/camera scripts |
+| end Main::Start → first frame | 1.7 | our runtime patches: 13 text `.gd` scripts compiled, 1.5 s |
+| first frame → attract | 5.9 | 0.8 s of intro frames, then **one 5.07 s frame**: the game loads `attract_panel.scn` synchronously; `level_01_attract_mode.scn` (the demo level) is 3.9 s, mostly player/enemy state scripts |
+
+By resource type (self time, 12.7 s of loads): GDScript `.gdc` 7.9 s (62%), patch `.gd` 1.5 s (12%), `oggvorbisstr` 1.6 s (13%), `ctex`
+1.15 s (9%), scenes 0.36 s. Main-thread samples in the load phases: String/StringName/CowData 19–30%, GDScript parser/analyzer/
+compiler functions 7–17%, malloc/free/memcpy 11–13%; without call graphs (no frame pointers) the String work is not yet attributed.
+Cold cache adds ~4.3 s, mostly in Servers/Scene (engine binary + Mesa page-in: 89 MB read from the SD during engine start).
+Pre-existing: `steam_manager.gd` fails to parse (GOG build, no Steam singleton), 70 ms.
+
+Candidates, largest first (not yet done): GDScript load cost (~9.4 s including patches; next: frame-pointer build + `perf -g` to find
+the String churn); the 5 s attract-panel frame (same script cost, inside game code); cold page-in (~4 s); launch.sh `nap 1` (~1 s);
+lazy shared setup for long streams (~0.2 s+); skip `basisu_transcoder_init` (0.35 s).
+
+### 6.27 Boot time, round 2: GDScript parse reuse, null GL, launcher, binary-token patches (2026-09-24)
+Times are seconds from `load_core` to the attract panel being instantiated, warm cache, `scripts/boot/` harness (the harness's own
+poller costs ~18% of CPU1). Engines keep `MISTER_BOOTLOG`: with it set, `core/os/mister_prof.*` scopes log exclusive main-thread time
+per load primitive (`scripts/boot/prof_phases.py`); unset they cost one cached check.
+
+**Cause of the script cost.** Call graphs don't unwind on this build (LTO, `.ARM.exidx` 15 KB, debug frames stripped), so the load
+primitives were timed directly: GDScript *parsing* was 6.6 s of the 16.4 s main-thread boot, 423 parses for 108 compiles.
+`GDScriptCache::parser_map` holds raw pointers: a `GDScriptParserRef` lived only while the analyzer of a dependent script did, so every
+later dependent parsed and analyzed the same file again, and `GDScript::reload` then parsed it once more for the compile.
+
+| Step (`apply_godot_mister.py`) | Build | Parses | Parse s | Attract (off → on, 2 runs) |
+|---|---|---|---|---|
+| Cache owns each parser ref (`mister_parser_keep`; `remove_parser` moves it to a list freed in `clear()`) | `godot43kp` | 423 → 216 | 6.6 → 1.9 | 18.9/18.7 → 13.1/12.9 |
+| `reload` compiles from the cached ref (raised to FULLY_SOLVED there, only if parsed without error and not being raised up the stack) | `godot43rq` | → 108 | → 0.95 | 18.95/18.88 → 11.9/12.0 |
+
+Both behind `MISTER_GD_KEEP_PARSERS` (default on). RSS +8 MB (227 → 235). Gameplay (`rq_play1`, 300 s): displayed 211/211 windows at 60,
+0 repeats; only the pre-existing Steam errors.
+
+**Null GL** (`drivers/gles3/mister_null_gl.*`, `godot43ng`): with `MISTER_FABRIC=1` glad loads every GL entry point from a null
+implementation and `DisplayServerMister` skips EGL; no Mesa library is loaded. Queries replay what Mesa llvmpipe answered on the device
+(138 extensions, version/renderer strings, limits; captured by a `MISTER_BOOTLOG` dump in `Config`); object names are unique counters,
+compile/link succeed, `glMapBufferRange` returns scratch memory. `MISTER_NULL_GL=0` = Mesa. Warm attract 12.06/12.05 → 11.67/11.36;
+**RSS 236 → 174 MB**; gameplay `ng_play1`: 186/186 displayed windows at 60, 0 repeats, max frame 22.5 ms, main-thread CPU 8.85 ms/frame
+(9.13 with Mesa). Mesa, libdrm and libtinfo are out of the release bundle and the launcher's environment.
+
+**Launcher** (`dist/games/CashCowDX/launch.sh`): the 1 s settle after the FPGA-ready loop runs only if the loop had to wait; `cpu_isolate`
+uses builtins per `/proc` entry (it forked readlink/cat/taskset for ~110 entries on CPU1 during boot) and forks `taskset` only for a
+process that moves. Engine exec 2.2 → 1.2 s; attract 11.10/11.06 → **9.43/9.44** (`lg_old`/`lg_new`, same engine).
+
+**Binary-token patches**: engine one-shot mode `MISTER_GD_TOKENIZE=<in>:<out>` (this engine's tokenizer, zstd) — `make_release.sh`
+runs it on the device and ships only `patches/*.gdc` with `override.cfg` naming `mister_patches.gdc`; `mister_patches.gd` loads `x.gdc`
+when present, else `x.gd` (dev dirs). Load time unchanged (9.41/9.48 vs 9.43/9.44); value is obfuscation only (gdsdecomp reverses it).
+
+**Tried, dropped — parallel audio loading.** (1) `load_threaded_request` for all 80 streams at `Main::start`: autoloads 2.3 → 8.2 s
+(the main thread blocked behind the single low-priority pool queue). (2) A dedicated CPU1 thread loading in reverse order with plain
+`ResourceLoader::load`: no gain (12.07/12.35 vs 12.06/12.05). CPU1 is at 100% through the boot (MiSTer Main ~38%, the launcher's forks
+~20% before the fix, the harness poller ~18%), so there is no spare CPU to overlap with. Audio stays paid up front on the main thread.
+
+**Pruned engine** (`godot43pn`, scons `disable_3d=yes modules_enabled_by_default=no` + gdscript, vorbis, ogg, webp, freetype,
+text_server_fb, svg, mbedtls): `.text` 50.9 → 36 MB, binary 68.3 → 51.4 MB; drops `basisu_transcoder_init` and the 3D/other class
+registration. `disable_advanced_gui=yes` was tried first (`godot43pm`) and **breaks the game**: it removes `SubViewportContainer`
+(settings_manager.gd fails to parse, black screen). The game is English-only (no translations, no `tr()`, two pixel fonts with MSDF
+off), so `text_server_fb` replaces `text_server_adv`: scanout screenshots of the attract loop are pixel-identical where the same panel
+is shown (scoreboard at 50 s; menu text at 14 s), katakana under the logo included. Attract (same launcher, `.gdc`): `ng` 10.10/9.73
+→ `pn` 8.95/8.96 warm; cold 13.34 → 12.17.
+
+Cumulative: warm 20.4 s (`vs`) → **9.0 s** (`pn` + launcher + `.gdc`); cold 25.4 → **12.2 s**.
+
+**Release `CashCowDX-MiSTer-20260924e.zip`** (20.8 MB, was ~40 MB): engine `godot43pn`, new launcher, 12 patches as `.gdc`
+(tokenized on the device by `make_release.sh`: 12 written, 0 failed), no Mesa. `Scripts/CashCowDX.sh` now also removes an old
+`mesa/` folder and, when `mister_patches.gdc` is present, the old `.gd` patch sources. Installed on .81 by extracting over
+`/media/fat`: checksums OK; `main=` still armed. Through the real path (`load_core` → `MiSTer_CashCowDX` → `launch.sh`): attract
+**11.98 s cold, 8.75 s warm**; VmHWM 160 MB; mem_wc write-combined; fabric gate advancing; CPU isolation and restore normal; engine
+stops on core change; `mainhook_state.sh` clean.
+Human check (user, 2026-09-24): hardware tests of `20260924e` passed, including SFX by ear (background PCM decode) and play past level 1.

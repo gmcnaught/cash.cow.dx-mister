@@ -6,7 +6,7 @@
 #
 # Engine: Godot 4.3 built for the Cortex-A9 with a MiSTer display server, DDR
 # audio and joystick drivers, and a canvas->FPGA-blitter bridge (the fabric
-# draws every frame). Mesa (bundled) only creates GL objects.
+# draws every frame). GL is a null implementation in the engine: no Mesa.
 #
 # What this script adds around the engine:
 #   - one engine at a time (lock + reap), FPGA-ready wait
@@ -75,7 +75,10 @@ while v=$(busybox devmem 0xFF706014 32 2>/dev/null) && [ -n "$v" ] && [ $((v & 0
 	[ "$waited" -ge 20 ] && { echo "FPGA still not ready after 20s — starting anyway"; break; }
 	nap 1; waited=$((waited + 1))
 done
-nap 1
+# Settle only after a wait: when the core was already configured (the usual
+# case — main= starts us after the load) the engine's own start-up (~2.5 s
+# before the fabric bring-up) is margin enough (PLAN §6.26).
+[ "$waited" -gt 0 ] && nap 1
 
 # --- mem_wc (optional; the fabric library falls back to /dev/mem) -------------
 # Load only if nothing has: never rmmod a mem_wc — a process can keep a live
@@ -102,11 +105,20 @@ cpu_isolate() {
 	# This launcher too: its watchdog loop forks every second, and each fork on
 	# CPU0 preempted the main thread (stutter capture base1, PLAN §6.25).
 	taskset -p 2 $$ >/dev/null 2>&1
-	for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+	# Builtins only per /proc entry: the readlink/cat/taskset forks for ~110
+	# entries ran on CPU1 while the engine boots (PLAN §6.27). taskset forks
+	# only for a process that moves.
+	local d pid cmd comm key old
+	for d in /proc/[0-9]*; do
+		pid=${d#/proc/}
 		[ "$pid" = "$$" ] && continue
-		readlink /proc/$pid/exe >/dev/null 2>&1 || continue      # kernel threads
-		case "$(cat /proc/$pid/comm 2>/dev/null)" in MiSTer|$ENGINE) continue ;; esac
-		old=$(taskset -p "$pid" 2>/dev/null | awk '{print $NF}')
+		cmd=""; read -r -d '' cmd 2>/dev/null < "$d/cmdline"
+		[ -n "$cmd" ] || continue                                 # kernel threads (and exited)
+		comm=""; read -r comm 2>/dev/null < "$d/comm"
+		case "$comm" in MiSTer|$ENGINE) continue ;; esac
+		old=""
+		while read -r key old; do [ "$key" = "Cpus_allowed:" ] && break; old=""; done 2>/dev/null < "$d/status"
+		old=${old##*,}; old=${old#"${old%%[!0]*}"}               # "00000003" -> "3"
 		[ -n "$old" ] && [ "$old" != "2" ] || continue
 		taskset -a -p 2 "$pid" >/dev/null 2>&1 && MOVED="$MOVED $pid:$old"
 	done
@@ -140,10 +152,6 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
 # --- engine ---------------------------------------------------------------------
-export LD_LIBRARY_PATH="$GAMEDIR/mesa"
-export LIBGL_DRIVERS_PATH="$GAMEDIR/mesa"
-export EGL_PLATFORM=surfaceless
-export GALLIUM_DRIVER=llvmpipe
 export MISTER_FABRIC=1
 export MISTER_FABRIC_LIB="$GAMEDIR/libmisterfabric.so"
 export GMLOADER_RASTER=mfgpu

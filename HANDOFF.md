@@ -15,6 +15,7 @@ A release bundle (`scripts/make_release.sh`) ships a CashCowDX-branded core (`_O
 button labels). Loading it from the core list starts the game with no daemon: MiSTer.ini `[CashCowDX] main=` (set by
 **Scripts → CashCowDX_CoresMenu**) makes MiSTer exec `MiSTer_CashCowDX` (upstream Main + one hook call, `tools/mister-wrapper/`)
 while this core is loaded; it starts `launch.sh`. The user supplies the GOG `CashCowDX.pck` (PLAN §6.23, §6.24).
+Current release: `CashCowDX-MiSTer-20260924e` (engine `godot43pn`): core load → attract 8.75 s warm / 12.0 s cold (PLAN §6.26–6.27); human hardware check passed.
 
 ## 2. Decisions already made (don't re-litigate)
 
@@ -30,6 +31,10 @@ while this core is loaded; it starts `launch.sh`. The user supplies the GOG `Cas
 | One frame pacer: the scanout counter (not Godot's limiter, not a wall clock); success is counted in *displayed* frames | PLAN §6.25 |
 | Pass/fail stutter runs use `PERF_ON=0`; the perf trace perturbs the device (tmpfs memory, SD I/O) | PLAN §6.25 |
 | Core RBF: maldita.castilla-mister `build-rbf.yml` `core_variant=cashcow` (same RTL as DonutDodo); next time prefer shared RBF + MRA | PLAN §6.23 |
+| Audio load cost stays up front at boot (parallelize, never lazy); parallel loading on CPU1 was tried and gave nothing | PLAN §6.27 |
+| No Mesa: null GL in fabric mode (`MISTER_NULL_GL=0` needs an external Mesa) | PLAN §6.27 |
+| Pruned build: `disable_3d`, module whitelist, `text_server_fb`; **not** `disable_advanced_gui` (removes SubViewportContainer) | PLAN §6.27 |
+| Patches ship as binary tokens (`.gdc`, tokenized on the device by `make_release.sh`) | PLAN §6.27 |
 
 ## 3. Layout
 
@@ -45,6 +50,7 @@ dist/                             Scripts/{CashCowDX.sh,CashCowDX_CoresMenu.sh},
 tools/mister-wrapper/             build-hps.sh (upstream Main_MiSTer + overlay/ + one inserted call -> MiSTer_CashCowDX)
 scripts/make_release.sh           assembles build/release/CashCowDX-MiSTer-<tag>.zip (RBF_SRC=<cashcow-variant RBF> required)
 scripts/stutter/                  run.sh (device capture of the installed release), frames.py (analysis), state_probe.gd
+scripts/boot/                     boot_time.sh (device: core load -> attract timing, MISTER_BOOTLOG), boot_report.py, prof_phases.py, load_self.py
 scripts/ (measurement)            ab_play.sh, perf_stat_play.sh, spike_probe.gd, cpu_isolate.sh, soak.sh, joy_inject.py,
                                   tier0_probe.gd, godot_dbg_profile.py, profile_summary.py, sfx_bench.gd, gd_access_bench.gd,
                                   named_cache_test.gd, sfx_hash.gd
@@ -59,6 +65,8 @@ A="-march=armv7-a -marm -mfpu=neon -mfloat-abi=hard -mtune=cortex-a9"
 docker run --rm -v "$PWD/work/src":/src godot4-armhf-build:bullseye sh -c "cd godot-4.3-stable && \
   scons -j\$(nproc) platform=linuxbsd arch=arm32 target=template_release production=yes debug_symbols=yes \
   x11=no wayland=no vulkan=no module_openxr_enabled=no \
+  disable_3d=yes modules_enabled_by_default=no module_gdscript_enabled=yes module_vorbis_enabled=yes module_ogg_enabled=yes \
+  module_webp_enabled=yes module_freetype_enabled=yes module_text_server_fb_enabled=yes module_svg_enabled=yes module_mbedtls_enabled=yes \
   CC=arm-linux-gnueabihf-gcc CXX=arm-linux-gnueabihf-g++ ccflags='$A' linkflags='$A'"
 docker run --rm -v "$PWD/work":/w godot4-armhf-build:bullseye sh -c \
   'arm-linux-gnueabihf-objcopy --strip-debug /w/src/godot-4.3-stable/bin/godot.linuxbsd.template_release.arm32 /w/build/<name>.cortexa9'

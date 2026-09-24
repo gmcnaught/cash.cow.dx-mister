@@ -44,6 +44,12 @@ fi
 for pid in $(ps -o pid,args | awk '/[c]ashcowdx_daemon.sh/{print $1}'); do
 	kill "$pid" 2>/dev/null && echo "launcher: stopped the old watcher (pid $pid)"
 done
+# Releases from 20260924e: no Mesa (the engine's GL is a null implementation) and
+# the patches ship as binary tokens (.gdc); drop what older releases left behind.
+[ -d "$GAMEDIR/mesa" ] && rm -rf "$GAMEDIR/mesa" && echo "launcher: removed the old Mesa runtime"
+if [ -f "$GAMEDIR/patches/mister_patches.gdc" ]; then
+	rm -f "$GAMEDIR"/patches/*.gd
+fi
 
 main_on() { [ -x "$WRAPPER" ] && grep -q "^main=$WRAPPER" "$INI" 2>/dev/null; }
 launcher_running() { ps -o args | grep -q '[C]ashCowDX/launch.sh'; }

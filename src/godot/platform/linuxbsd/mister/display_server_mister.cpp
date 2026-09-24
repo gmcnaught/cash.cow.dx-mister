@@ -21,6 +21,7 @@
 
 #include "core/os/os.h"
 #include "drivers/gles3/mister_fabric_bridge.h"
+#include "drivers/gles3/mister_null_gl.h"
 #include "drivers/gles3/rasterizer_gles3.h"
 #include "drivers/gles3/storage/texture_storage.h"
 
@@ -208,6 +209,10 @@ void DisplayServerMister::_present() {
 
 void DisplayServerMister::gl_window_make_current(WindowID p_window_id) {
 	// Called on whichever thread renders (main, or the separate render thread).
+	if (MisterNullGL::enabled()) {
+		_ensure_fbo(); // No context to make current.
+		return;
+	}
 	if (eglGetCurrentContext() != egl_context) {
 		eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context);
 	}
@@ -215,6 +220,9 @@ void DisplayServerMister::gl_window_make_current(WindowID p_window_id) {
 }
 
 void DisplayServerMister::release_rendering_thread() {
+	if (MisterNullGL::enabled()) {
+		return;
+	}
 	eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
@@ -239,9 +247,15 @@ DisplayServerMister::DisplayServerMister(const String &p_rendering_driver, Error
 		ERR_PRINT(vformat("MiSTer display server supports only opengl3_es, not \"%s\".", p_rendering_driver));
 		return;
 	}
-	r_error = _init_egl();
-	if (r_error != OK) {
-		return;
+	if (MisterNullGL::enabled()) {
+		// The fabric draws every frame from CPU-side data: no EGL, no Mesa (PLAN §6.27).
+		print_line("MiSTer: null GL (no EGL/Mesa); the fabric draws every frame.");
+		r_error = OK;
+	} else {
+		r_error = _init_egl();
+		if (r_error != OK) {
+			return;
+		}
 	}
 	RasterizerGLES3::make_current(false); // GLES, not desktop GL.
 
@@ -253,6 +267,12 @@ DisplayServerMister::DisplayServerMister(const String &p_rendering_driver, Error
 	rgba = (uint8_t *)memalloc(size.x * size.y * 4);
 	// Tier 2 (MISTER_FABRIC=1) owns the frame; the Tier-1 DDR writer then stays off.
 	if (!MisterFabricBridge::init()) {
+		if (MisterNullGL::enabled()) {
+			// Nothing would reach the screen: the null GL renders nothing to read back.
+			ERR_PRINT("MiSTer: MISTER_FABRIC=1 but the fabric library failed to start; set MISTER_NULL_GL=0 for the GL readback path.");
+			r_error = ERR_CANT_CREATE;
+			return;
+		}
 		_init_ddr();
 	}
 	if (JoypadMister::is_enabled()) {

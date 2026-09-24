@@ -359,6 +359,391 @@ edit(VC, "_build_pcm_cache(); // MISTER",
      '\tif (OggVorbisSharedSetup::enabled()) {\n\t\tshared_setup = OggVorbisSharedSetup::create(packet_sequence);\n\t}\n'
      '\t_build_pcm_cache(); // MISTER: after the shared setup, which makes the decode cheap.\n')
 
+# ---- Vorbis: PCM cache decode off the loading thread (PLAN §6.26) ----
+# Step 2 decoded the 45 SFX on the loading thread at boot (+1.7 s). The decode
+# now runs as a low-priority WorkerThreadPool task (the pool threads stay on
+# CPU1; the main thread pins itself to CPU0 later). Until the task publishes
+# the cache, playbacks stream through the shared setup (~0.85 ms per start).
+# The task holds a reference on the stream until it has published, so the
+# stream can't be freed under it. MISTER_OGG_PCM_ASYNC=0 = decode inline.
+edit(VH, '#include "core/object/worker_thread_pool.h" // MISTER',
+     '#include "scene/resources/audio_stream_wav.h" // MISTER: PCM cache\n',
+     '#include "scene/resources/audio_stream_wav.h" // MISTER: PCM cache\n'
+     '#include "core/object/worker_thread_pool.h" // MISTER: PCM cache task\n')
+edit(VH, "SafeFlag pcm_ready;",
+     '\tRef<AudioStreamWAV> pcm_cache; // MISTER: short clips, decoded once.\n\tvoid _build_pcm_cache();\n',
+     '\tRef<AudioStreamWAV> pcm_cache; // MISTER: short clips, decoded once; valid once pcm_ready is set.\n'
+     '\tSafeFlag pcm_ready;\n'
+     '\tWorkerThreadPool::TaskID pcm_task = WorkerThreadPool::INVALID_TASK_ID;\n'
+     '\tSafeNumeric<uint64_t> pcm_task_thread; // Thread::ID that ran the task.\n'
+     '\tvoid _build_pcm_cache();\n'
+     '\tRef<AudioStreamWAV> _decode_pcm(double p_len);\n'
+     '\tvoid _pcm_wait();\n'
+     '\tstatic void _pcm_task(void *p_stream);\n')
+edit(VC, "Ref<AudioStreamWAV> AudioStreamOggVorbis::_decode_pcm",
+     '\tRef<AudioStreamPlaybackOggVorbis> pb = instantiate_playback();\n\tif (pb.is_null()) {\n\t\treturn;\n\t}\n',
+     '\tstatic int async = -1;\n'
+     '\tif (async < 0) {\n\t\tconst char *e = getenv("MISTER_OGG_PCM_ASYNC");\n\t\tasync = (e != nullptr && e[0] == \'0\') ? 0 : 1;\n\t}\n'
+     '\tif (async == 1 && get_reference_count() > 0) {\n'
+     '\t\treference(); // Released by the task after it publishes.\n'
+     '\t\tpcm_task = WorkerThreadPool::get_singleton()->add_native_task(&AudioStreamOggVorbis::_pcm_task, this, false, "MISTER ogg pcm");\n'
+     '\t\treturn;\n'
+     '\t}\n'
+     '\tpcm_cache = _decode_pcm(len);\n'
+     '\tif (pcm_cache.is_valid()) {\n\t\tpcm_ready.set();\n\t}\n'
+     '}\n\n'
+     'void AudioStreamOggVorbis::_pcm_task(void *p_stream) {\n'
+     '\tAudioStreamOggVorbis *s = (AudioStreamOggVorbis *)p_stream;\n'
+     '\ts->pcm_task_thread.set(Thread::get_caller_id());\n'
+     '\tRef<AudioStreamWAV> w = s->_decode_pcm(s->get_length());\n'
+     '\tif (w.is_valid()) {\n\t\ts->pcm_cache = w;\n\t\ts->pcm_ready.set();\n\t}\n'
+     '\tif (s->unreference()) {\n\t\tmemdelete(s); // Last reference: nothing touches s after this.\n\t}\n'
+     '}\n\n'
+     'void AudioStreamOggVorbis::_pcm_wait() {\n'
+     '\tif (pcm_task != WorkerThreadPool::INVALID_TASK_ID) {\n'
+     '\t\tWorkerThreadPool::get_singleton()->wait_for_task_completion(pcm_task);\n'
+     '\t\tpcm_task = WorkerThreadPool::INVALID_TASK_ID;\n'
+     '\t}\n'
+     '}\n\n'
+     'Ref<AudioStreamWAV> AudioStreamOggVorbis::_decode_pcm(double len) {\n'
+     '\tAudioServer *as = AudioServer::get_singleton();\n'
+     '\tRef<AudioStreamPlaybackOggVorbis> pb = instantiate_playback();\n\tif (pb.is_null()) {\n\t\treturn Ref<AudioStreamWAV>();\n\t}\n')
+edit(VC, "pcm_ready.clear();",
+     'void AudioStreamOggVorbis::_build_pcm_cache() {\n\tpcm_cache.unref();\n',
+     'void AudioStreamOggVorbis::_build_pcm_cache() {\n\t_pcm_wait();\n\tpcm_ready.clear();\n\tpcm_cache.unref();\n')
+edit(VC, "Ref<AudioStreamWAV> w;\n\tw.instantiate();",
+     '\tdata.resize(total * 4);\n'
+     '\tpcm_cache.instantiate();\n'
+     '\tpcm_cache->set_format(AudioStreamWAV::FORMAT_16_BITS);\n'
+     '\tpcm_cache->set_stereo(true);\n'
+     '\tpcm_cache->set_mix_rate(rate);\n'
+     '\tpcm_cache->set_loop_mode(AudioStreamWAV::LOOP_DISABLED);\n'
+     '\tpcm_cache->set_data(data);\n'
+     '}\n',
+     '\tdata.resize(total * 4);\n'
+     '\tRef<AudioStreamWAV> w;\n\tw.instantiate();\n'
+     '\tw->set_format(AudioStreamWAV::FORMAT_16_BITS);\n'
+     '\tw->set_stereo(true);\n'
+     '\tw->set_mix_rate(rate);\n'
+     '\tw->set_loop_mode(AudioStreamWAV::LOOP_DISABLED);\n'
+     '\tw->set_data(data);\n'
+     '\treturn w;\n'
+     '}\n')
+edit(VC, "pcm_ready.is_set() && !loop",
+     '\tif (pcm_cache.is_valid() && !loop) {\n',
+     '\tif (pcm_ready.is_set() && !loop) {\n')
+edit(VC, "_pcm_wait(); // MISTER: the task reads packet_sequence",
+     'void AudioStreamOggVorbis::set_packet_sequence(Ref<OggPacketSequence> p_packet_sequence) {\n',
+     'void AudioStreamOggVorbis::set_packet_sequence(Ref<OggPacketSequence> p_packet_sequence) {\n'
+     '\t_pcm_wait(); // MISTER: the task reads packet_sequence and the shared setup.\n')
+edit(VC, "MISTER: reclaim the finished PCM task",
+     '\tif (shared_setup != nullptr) {\n\t\tshared_setup->unref(); // MISTER: release the shared setup.\n\t}\n}\n',
+     '\t// MISTER: reclaim the finished PCM task (it held a reference, so it is done), unless\n'
+     '\t// its own final unreference is running this destructor.\n'
+     '\tif (pcm_task != WorkerThreadPool::INVALID_TASK_ID && pcm_task_thread.get() != Thread::get_caller_id()) {\n'
+     '\t\tWorkerThreadPool::get_singleton()->wait_for_task_completion(pcm_task);\n'
+     '\t}\n'
+     '\tif (shared_setup != nullptr) {\n\t\tshared_setup->unref(); // MISTER: release the shared setup.\n\t}\n}\n')
+
+# ---- Boot log (PLAN §6.26) ----
+# MISTER_BOOTLOG=<file>: CLOCK_MONOTONIC-stamped lines for Main's startup
+# phases (the benchmark marks, which are TOOLS_ENABLED-only upstream), every
+# ResourceLoader::_load (nesting depth, ms, path) and PCM cache tasks. Unset =
+# one static check per call.
+edit("core/os/os.cpp", "void mister_bootlog(",
+     '#include <stdarg.h>\n',
+     '#include <stdarg.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <time.h>\n\n'
+     '// MISTER: boot log (MISTER_BOOTLOG=<file>), CLOCK_MONOTONIC seconds per line.\n'
+     'static FILE *mister_bootlog_file = nullptr;\n'
+     'bool mister_bootlog_on() {\n'
+     '\tstatic int on = -1;\n'
+     '\tif (on < 0) {\n'
+     '\t\tconst char *p = getenv("MISTER_BOOTLOG");\n'
+     '\t\tmister_bootlog_file = (p && p[0]) ? fopen(p, "w") : nullptr;\n'
+     '\t\tif (mister_bootlog_file) {\n\t\t\tsetvbuf(mister_bootlog_file, nullptr, _IOLBF, 0);\n\t\t}\n'
+     '\t\ton = mister_bootlog_file ? 1 : 0;\n'
+     '\t}\n'
+     '\treturn on == 1;\n'
+     '}\n'
+     'void mister_bootlog(const char *p_fmt, ...) {\n'
+     '\tif (!mister_bootlog_on()) {\n\t\treturn;\n\t}\n'
+     '\tstruct timespec ts;\n\tclock_gettime(CLOCK_MONOTONIC, &ts);\n'
+     '\tchar buf[768];\n\tva_list ap;\n\tva_start(ap, p_fmt);\n\tvsnprintf(buf, sizeof(buf), p_fmt, ap);\n\tva_end(ap);\n'
+     '\tfprintf(mister_bootlog_file, "%ld.%06ld %s\\n", (long)ts.tv_sec, ts.tv_nsec / 1000, buf);\n'
+     '}\n')
+edit("core/os/os.cpp", 'mister_bootlog("begin %s:%s"',
+     'void OS::benchmark_begin_measure(const String &p_context, const String &p_what) {\n#ifdef TOOLS_ENABLED\n',
+     'void OS::benchmark_begin_measure(const String &p_context, const String &p_what) {\n'
+     '\tif (mister_bootlog_on()) {\n\t\tmister_bootlog("begin %s:%s", p_context.utf8().get_data(), p_what.utf8().get_data());\n\t}\n'
+     '#ifdef TOOLS_ENABLED\n')
+edit("core/os/os.cpp", 'mister_bootlog("end %s:%s"',
+     'void OS::benchmark_end_measure(const String &p_context, const String &p_what) {\n#ifdef TOOLS_ENABLED\n',
+     'void OS::benchmark_end_measure(const String &p_context, const String &p_what) {\n'
+     '\tif (mister_bootlog_on()) {\n\t\tmister_bootlog("end %s:%s", p_context.utf8().get_data(), p_what.utf8().get_data());\n\t}\n'
+     '#ifdef TOOLS_ENABLED\n')
+edit("core/io/resource_loader.cpp", "mister_bootlog_on();",
+     '#include "servers/rendering_server.h"\n',
+     '#include "servers/rendering_server.h"\n\n'
+     'bool mister_bootlog_on(); // MISTER: core/os/os.cpp\nvoid mister_bootlog(const char *p_fmt, ...);\n')
+edit("core/io/resource_loader.cpp", "mf_boot_t0",
+     '\tconst String &original_path = p_original_path.is_empty() ? p_path : p_original_path;\n\tload_nesting++;\n',
+     '\tconst String &original_path = p_original_path.is_empty() ? p_path : p_original_path;\n'
+     '\tconst uint64_t mf_boot_t0 = mister_bootlog_on() ? OS::get_singleton()->get_ticks_usec() : 0; // MISTER: boot log\n'
+     '\tload_nesting++;\n')
+edit("core/io/resource_loader.cpp", 'mister_bootlog("load %d',
+     '\tload_paths_stack->resize(load_paths_stack->size() - 1);\n\tres_ref_overrides.erase(load_nesting);\n\tload_nesting--;\n',
+     '\tload_paths_stack->resize(load_paths_stack->size() - 1);\n\tres_ref_overrides.erase(load_nesting);\n\tload_nesting--;\n'
+     '\tif (mf_boot_t0) {\n'
+     '\t\tmister_bootlog("load %d %.2f %s", load_nesting, (OS::get_singleton()->get_ticks_usec() - mf_boot_t0) / 1000.0, p_path.utf8().get_data());\n'
+     '\t}\n')
+edit(VC, "void mister_bootlog(const char",
+     '#include <stdlib.h> // MISTER: getenv\n',
+     '#include <stdlib.h> // MISTER: getenv\n\nvoid mister_bootlog(const char *p_fmt, ...); // MISTER: core/os/os.cpp\n')
+edit(VC, 'mister_bootlog("pcm %.3f',
+     '\tRef<AudioStreamWAV> w = s->_decode_pcm(s->get_length());\n',
+     '\tRef<AudioStreamWAV> w = s->_decode_pcm(s->get_length());\n'
+     '\tmister_bootlog("pcm %.3f s decoded", s->get_length());\n')
+
+# ---- Boot cost attribution (PLAN §6.26) ----
+# With MISTER_BOOTLOG set: exclusive main-thread time per load primitive
+# (core/os/mister_prof.*), dumped cumulatively into the boot log after every
+# top-level load and every startup phase end. Off = one cached check per scope.
+def prof_scope(rel, sig, cat, first_include):
+    edit(rel, '#include "core/os/mister_prof.h" // MISTER', first_include, first_include + '#include "core/os/mister_prof.h" // MISTER: boot cost attribution\n')
+    edit(rel, f"MisterProfScope mf_prof({cat});", sig, sig + f"\tMisterProfScope mf_prof({cat}); // MISTER\n")
+prof_scope("core/io/resource_loader.cpp", "Ref<Resource> ResourceLoader::_load(const String &p_path, const String &p_original_path, const String &p_type_hint, ResourceFormatLoader::CacheMode p_cache_mode, Error *r_error, bool p_use_sub_threads, float *r_progress) {\n", "MF_RES_LOAD", '#include "resource_loader.h"\n')
+prof_scope("core/io/resource_format_binary.cpp", "Error ResourceLoaderBinary::load() {\n", "MF_RES_BINARY", '#include "resource_format_binary.h"\n')
+prof_scope("modules/gdscript/gdscript.cpp", "Error GDScript::reload(bool p_keep_state) {\n", "MF_GD_RELOAD", '#include "gdscript.h"\n')
+prof_scope("modules/gdscript/gdscript_parser.cpp", "Error GDScriptParser::parse(const String &p_source_code, const String &p_script_path, bool p_for_completion, bool p_parse_body) {\n", "MF_GD_PARSE", '#include "gdscript_parser.h"\n')
+edit("modules/gdscript/gdscript_parser.cpp", "MisterProfScope mf_prof(MF_GD_PARSE); // MISTER: binary",
+     "Error GDScriptParser::parse_binary(const Vector<uint8_t> &p_binary, const String &p_script_path) {\n",
+     "Error GDScriptParser::parse_binary(const Vector<uint8_t> &p_binary, const String &p_script_path) {\n\tMisterProfScope mf_prof(MF_GD_PARSE); // MISTER: binary\n")
+prof_scope("modules/gdscript/gdscript_analyzer.cpp", "Error GDScriptAnalyzer::resolve_inheritance() {\n", "MF_GD_ANALYZE", '#include "gdscript_analyzer.h"\n')
+for fn in ("resolve_interface", "resolve_body", "resolve_dependencies"):
+    edit("modules/gdscript/gdscript_analyzer.cpp", f"MisterProfScope mf_prof(MF_GD_ANALYZE); // MISTER: {fn}",
+         f"Error GDScriptAnalyzer::{fn}() {{\n", f"Error GDScriptAnalyzer::{fn}() {{\n\tMisterProfScope mf_prof(MF_GD_ANALYZE); // MISTER: {fn}\n")
+prof_scope("modules/gdscript/gdscript_compiler.cpp", "Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_script, bool p_keep_state) {\n", "MF_GD_COMPILE", '#include "gdscript_compiler.h"\n')
+prof_scope("scene/resources/packed_scene.cpp", "Node *SceneState::instantiate(GenEditState p_edit_state) const {\n", "MF_SCENE_INST", '#include "packed_scene.h"\n')
+prof_scope("scene/main/node.cpp", "void Node::_propagate_ready() {\n", "MF_READY", '#include "node.h"\n')
+prof_scope("modules/webp/webp_common.cpp", "Ref<Image> _webp_unpack(const Vector<uint8_t> &p_buffer) {\n", "MF_WEBP", '#include "webp_common.h"\n')
+prof_scope("modules/vorbis/audio_stream_ogg_vorbis.cpp", "void AudioStreamOggVorbis::maybe_update_info() {\n", "MF_OGG_INFO", '#include "audio_stream_ogg_vorbis.h"\n')
+edit("core/io/resource_loader.cpp", 'mister_prof_dump("load")',
+     '\t\tmister_bootlog("load %d %.2f %s", load_nesting, (OS::get_singleton()->get_ticks_usec() - mf_boot_t0) / 1000.0, p_path.utf8().get_data());\n',
+     '\t\tmister_bootlog("load %d %.2f %s", load_nesting, (OS::get_singleton()->get_ticks_usec() - mf_boot_t0) / 1000.0, p_path.utf8().get_data());\n'
+     '\t\tif (load_nesting == 0) {\n\t\t\tmister_prof_dump("load");\n\t\t}\n')
+edit("core/os/os.cpp", '#include "core/os/mister_prof.h" // MISTER',
+     '#include "os.h"\n', '#include "os.h"\n#include "core/os/mister_prof.h" // MISTER: boot cost attribution\n')
+edit("core/os/os.cpp", 'mister_prof_dump("phase")',
+     '\t\tmister_bootlog("end %s:%s", p_context.utf8().get_data(), p_what.utf8().get_data());\n',
+     '\t\tmister_bootlog("end %s:%s", p_context.utf8().get_data(), p_what.utf8().get_data());\n\t\tmister_prof_dump("phase");\n')
+
+# ---- GDScript: keep dependency parses for reuse (PLAN §6.27) ----
+# GDScriptCache::parser_map holds raw pointers; a GDScriptParserRef lives only
+# while the analyzer of the script that depends on it does, so every later
+# dependent re-parses and re-analyzes the same file: 423 parses for 108
+# compiles at boot (6.6 s of the 16.4 s main-thread boot). The cache now keeps
+# a reference to each parser it creates. remove_parser() (source change, move,
+# script freed) moves the reference to a list released in clear(), because the
+# ref may still be in use further up the call chain. MISTER_GD_KEEP_PARSERS=0 = upstream.
+GC = "modules/gdscript/gdscript_cache.cpp"
+GCH = "modules/gdscript/gdscript_cache.h"
+edit(GCH, "mister_parser_keep;",
+     "\tHashMap<String, GDScriptParserRef *> parser_map;\n",
+     "\tHashMap<String, GDScriptParserRef *> parser_map;\n"
+     "\tHashMap<String, Ref<GDScriptParserRef>> mister_parser_keep; // MISTER: owned, reused by later dependents.\n"
+     "\tVector<Ref<GDScriptParserRef>> mister_parser_dropped; // MISTER: removed while possibly in use; released in clear().\n"
+     "\tstatic bool mister_keep_parsers();\n")
+edit(GC, "#include <stdlib.h> // MISTER", '#include "gdscript_cache.h"\n', '#include "gdscript_cache.h"\n\n#include <stdlib.h> // MISTER: getenv\n')
+edit(GC, "bool GDScriptCache::mister_keep_parsers()",
+     "Ref<GDScriptParserRef> GDScriptCache::get_parser(",
+     "bool GDScriptCache::mister_keep_parsers() {\n"
+     "\tstatic int on = -1;\n"
+     "\tif (on < 0) {\n\t\tconst char *e = getenv(\"MISTER_GD_KEEP_PARSERS\");\n\t\ton = (e != nullptr && e[0] == '0') ? 0 : 1;\n\t}\n"
+     "\treturn on == 1;\n}\n\n"
+     "Ref<GDScriptParserRef> GDScriptCache::get_parser(")
+edit(GC, "singleton->mister_parser_keep[p_path] = ref;",
+     "\t\tref->path = p_path;\n\t\tsingleton->parser_map[p_path] = ref.ptr();\n",
+     "\t\tref->path = p_path;\n\t\tsingleton->parser_map[p_path] = ref.ptr();\n"
+     "\t\tif (mister_keep_parsers()) {\n\t\t\tsingleton->mister_parser_keep[p_path] = ref; // MISTER\n\t\t}\n")
+edit(GC, "mister_parser_dropped.push_back(K->value);",
+     "\t// Can't clear the parser because some other parser might be currently using it in the chain of calls.\n\tsingleton->parser_map.erase(p_path);\n",
+     "\t// Can't clear the parser because some other parser might be currently using it in the chain of calls.\n\tsingleton->parser_map.erase(p_path);\n"
+     "\tif (HashMap<String, Ref<GDScriptParserRef>>::Iterator K = singleton->mister_parser_keep.find(p_path)) {\n"
+     "\t\tsingleton->mister_parser_dropped.push_back(K->value); // MISTER: not freed here, see above.\n"
+     "\t\tsingleton->mister_parser_keep.remove(K);\n\t}\n")
+edit(GC, "singleton->mister_parser_keep.clear();",
+     "\tparser_map_refs.clear();\n\tsingleton->shallow_gdscript_cache.clear();\n",
+     "\tparser_map_refs.clear();\n"
+     "\tfor (KeyValue<String, Ref<GDScriptParserRef>> &E : singleton->mister_parser_keep) {\n\t\tE.value->clear();\n\t}\n"
+     "\tfor (Ref<GDScriptParserRef> &E : singleton->mister_parser_dropped) {\n\t\tE->clear();\n\t}\n"
+     "\tsingleton->mister_parser_keep.clear(); // MISTER\n\tsingleton->mister_parser_dropped.clear();\n"
+     "\tsingleton->shallow_gdscript_cache.clear();\n")
+
+# GDScript::reload parsed and analyzed its own file again even when the cache
+# already held a complete analysis of the same tokens (the hash check above
+# drops a stale one). It now compiles from that parse when the cache entry is
+# parsed without error (raised to FULLY_SOLVED here) and not being raised further up the call stack
+# (mister_raising); otherwise the upstream local parse runs. The compiler only
+# reads the tree. Same MISTER_GD_KEEP_PARSERS switch.
+edit(GCH, "bool mister_raising = false;",
+     "\tbool clearing = false;\n\tbool abandoned = false;\n",
+     "\tbool clearing = false;\n\tbool abandoned = false;\n"
+     "\tbool mister_raising = false; // MISTER: inside raise_status (the tree may be partly analyzed).\n")
+edit(GC, "struct MfRaising",
+     "Error GDScriptParserRef::raise_status(Status p_new_status) {\n\tERR_FAIL_COND_V(clearing, ERR_BUG);\n\tERR_FAIL_COND_V(parser == nullptr && status != EMPTY, ERR_BUG);\n",
+     "Error GDScriptParserRef::raise_status(Status p_new_status) {\n\tERR_FAIL_COND_V(clearing, ERR_BUG);\n\tERR_FAIL_COND_V(parser == nullptr && status != EMPTY, ERR_BUG);\n"
+     "\tstruct MfRaising { // MISTER: see GDScript::reload.\n"
+     "\t\tbool &flag;\n\t\tbool old;\n"
+     "\t\tMfRaising(bool &p_flag) :\n\t\t\t\tflag(p_flag), old(p_flag) { flag = true; }\n"
+     "\t\t~MfRaising() { flag = old; }\n"
+     "\t} mf_raising(mister_raising);\n")
+edit("modules/gdscript/gdscript.cpp", "Dependents raise it only as far as they need",
+     "\tvalid = false;\n\tGDScriptParser parser;\n\tError err;\n\tif (!binary_tokens.is_empty()) {\n\t\terr = parser.parse_binary(binary_tokens, path);\n\t} else {\n\t\terr = parser.parse(source, path, false);\n\t}\n",
+     "\tvalid = false;\n"
+     "\t// MISTER: compile from the cache's complete analysis of this file (same tokens) instead of parsing again.\n"
+     "\tRef<GDScriptParserRef> mf_ref;\n"
+     "\tif (GDScriptCache::mister_keep_parsers()) {\n"
+     "\t\tconst String mf_path = path.is_empty() ? get_path() : path;\n"
+     "\t\tif (!mf_path.is_empty() && GDScriptCache::has_parser(mf_path)) {\n"
+     "\t\t\tError mf_err = OK;\n"
+     "\t\t\tmf_ref = GDScriptCache::get_parser(mf_path, GDScriptParserRef::EMPTY, mf_err);\n"
+     "\t\t\t// Dependents raise it only as far as they need (usually the interface): finish the analysis here.\n"
+     "\t\t\tif (mf_ref.is_valid() && (mf_err != OK || mf_ref->status < GDScriptParserRef::PARSED || mf_ref->result != OK || mf_ref->mister_raising || mf_ref->parser == nullptr ||\n"
+     "\t\t\t\t\t\t\t\t\t\tmf_ref->raise_status(GDScriptParserRef::FULLY_SOLVED) != OK || mf_ref->analyzer == nullptr)) {\n"
+     "\t\t\t\tmf_ref.unref();\n"
+     "\t\t\t}\n"
+     "\t\t}\n"
+     "\t}\n"
+     "\tGDScriptParser mf_local_parser;\n"
+     "\tGDScriptParser &parser = mf_ref.is_valid() ? *mf_ref->parser : mf_local_parser;\n"
+     "\tError err = OK;\n"
+     "\tif (mf_ref.is_null()) {\n"
+     "\t\tif (!binary_tokens.is_empty()) {\n\t\t\terr = parser.parse_binary(binary_tokens, path);\n\t\t} else {\n\t\t\terr = parser.parse(source, path, false);\n\t\t}\n"
+     "\t}\n")
+edit("modules/gdscript/gdscript.cpp", "mf_ref->analyzer->resolve_dependencies()",
+     "\tGDScriptAnalyzer analyzer(&parser);\n\terr = analyzer.analyze();\n",
+     "\tif (mf_ref.is_valid()) {\n"
+     "\t\terr = mf_ref->analyzer->resolve_dependencies(); // MISTER: the rest of analyze() is done.\n"
+     "\t} else {\n"
+     "\t\tGDScriptAnalyzer analyzer(&parser);\n\t\terr = analyzer.analyze();\n"
+     "\t}\n")
+
+# ---- GDScript: tokenize mode for shipping the patches as .gdc (PLAN §6.27) ----
+# MISTER_GD_TOKENIZE=<in dir>:<out dir> turns the engine into a one-shot tool:
+# every <in>/*.gd is written as <out>/*.gdc (binary tokens, zstd), with this
+# engine's own tokenizer so the format always matches the shipped engine; then
+# the process exits (status 1 if any file failed). make_release.sh runs it on
+# the device.
+GR = "modules/gdscript/register_types.cpp"
+edit(GR, "static void mister_tokenize_mode()",
+     "void initialize_gdscript_module(ModuleInitializationLevel p_level) {\n",
+     "// MISTER: see apply_godot_mister.py (tokenize mode).\n"
+     "static void mister_tokenize_mode() {\n"
+     "\tconst char *spec = getenv(\"MISTER_GD_TOKENIZE\");\n"
+     "\tif (spec == nullptr || spec[0] == '\\0') {\n\t\treturn;\n\t}\n"
+     "\tconst Vector<String> dirs = String::utf8(spec).split(\":\");\n"
+     "\tint failed = 0, done = 0;\n"
+     "\tif (dirs.size() != 2) {\n\t\tfprintf(stderr, \"MISTER_GD_TOKENIZE=<in dir>:<out dir>\\n\");\n\t\tfailed = 1;\n\t} else {\n"
+     "\t\tRef<DirAccess> da = DirAccess::open(dirs[0]);\n"
+     "\t\tif (da.is_null()) {\n\t\t\tfprintf(stderr, \"cannot open %s\\n\", dirs[0].utf8().get_data());\n\t\t\tfailed = 1;\n\t\t} else {\n"
+     "\t\t\tfor (const String &f : da->get_files()) {\n"
+     "\t\t\t\tif (f.get_extension() != \"gd\") {\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n"
+     "\t\t\t\tError err = OK;\n"
+     "\t\t\t\tconst String src = FileAccess::get_file_as_string(dirs[0].path_join(f), &err);\n"
+     "\t\t\t\tconst Vector<uint8_t> tok = err == OK ? GDScriptTokenizerBuffer::parse_code_string(src, GDScriptTokenizerBuffer::COMPRESS_ZSTD) : Vector<uint8_t>();\n"
+     "\t\t\t\tRef<FileAccess> out = tok.is_empty() ? Ref<FileAccess>() : FileAccess::open(dirs[1].path_join(f.get_basename() + \".gdc\"), FileAccess::WRITE);\n"
+     "\t\t\t\tif (out.is_null()) {\n\t\t\t\t\tfprintf(stderr, \"FAILED %s\\n\", f.utf8().get_data());\n\t\t\t\t\tfailed++;\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n"
+     "\t\t\t\tout->store_buffer(tok.ptr(), tok.size());\n"
+     "\t\t\t\tout.unref();\n"
+     "\t\t\t\tprintf(\"tokenized %s (%d bytes)\\n\", f.utf8().get_data(), tok.size());\n"
+     "\t\t\t\tdone++;\n"
+     "\t\t\t}\n\t\t}\n\t}\n"
+     "\tprintf(\"MISTER_GD_TOKENIZE: %d written, %d failed\\n\", done, failed);\n"
+     "\tfflush(stdout);\n\tfflush(stderr);\n"
+     "\t_exit(failed ? 1 : 0);\n"
+     "}\n\n"
+     "void initialize_gdscript_module(ModuleInitializationLevel p_level) {\n")
+edit(GR, "mister_tokenize_mode(); // MISTER",
+     "\t\tGDScriptUtilityFunctions::register_functions();\n\t}\n",
+     "\t\tGDScriptUtilityFunctions::register_functions();\n\t\tmister_tokenize_mode(); // MISTER: exits when MISTER_GD_TOKENIZE is set.\n\t}\n")
+edit(GR, "#include <unistd.h> // MISTER",
+     '#include "core/io/resource_loader.h"\n',
+     '#include "core/io/resource_loader.h"\n\n#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h> // MISTER: tokenize mode\n')
+
+# ---- GDScript: tokenize mode for shipping the patches as .gdc (PLAN §6.27) ----
+# MISTER_GD_TOKENIZE=<in dir>:<out dir> turns the engine into a one-shot tool:
+# every <in>/*.gd is written as <out>/*.gdc (binary tokens, zstd), with this
+# engine's own tokenizer so the format always matches the shipped engine; then
+# the process exits (status 1 if any file failed). make_release.sh runs it on
+# the device.
+GR = "modules/gdscript/register_types.cpp"
+edit(GR, "static void mister_tokenize_mode()",
+     "void initialize_gdscript_module(ModuleInitializationLevel p_level) {\n",
+     "// MISTER: see apply_godot_mister.py (tokenize mode).\n"
+     "static void mister_tokenize_mode() {\n"
+     "\tconst char *spec = getenv(\"MISTER_GD_TOKENIZE\");\n"
+     "\tif (spec == nullptr || spec[0] == '\\0') {\n\t\treturn;\n\t}\n"
+     "\tconst Vector<String> dirs = String::utf8(spec).split(\":\");\n"
+     "\tint failed = 0, done = 0;\n"
+     "\tif (dirs.size() != 2) {\n\t\tfprintf(stderr, \"MISTER_GD_TOKENIZE=<in dir>:<out dir>\\n\");\n\t\tfailed = 1;\n\t} else {\n"
+     "\t\tRef<DirAccess> da = DirAccess::open(dirs[0]);\n"
+     "\t\tif (da.is_null()) {\n\t\t\tfprintf(stderr, \"cannot open %s\\n\", dirs[0].utf8().get_data());\n\t\t\tfailed = 1;\n\t\t} else {\n"
+     "\t\t\tfor (const String &f : da->get_files()) {\n"
+     "\t\t\t\tif (f.get_extension() != \"gd\") {\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n"
+     "\t\t\t\tError err = OK;\n"
+     "\t\t\t\tconst String src = FileAccess::get_file_as_string(dirs[0].path_join(f), &err);\n"
+     "\t\t\t\tconst Vector<uint8_t> tok = err == OK ? GDScriptTokenizerBuffer::parse_code_string(src, GDScriptTokenizerBuffer::COMPRESS_ZSTD) : Vector<uint8_t>();\n"
+     "\t\t\t\tRef<FileAccess> out = tok.is_empty() ? Ref<FileAccess>() : FileAccess::open(dirs[1].path_join(f.get_basename() + \".gdc\"), FileAccess::WRITE);\n"
+     "\t\t\t\tif (out.is_null()) {\n\t\t\t\t\tfprintf(stderr, \"FAILED %s\\n\", f.utf8().get_data());\n\t\t\t\t\tfailed++;\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n"
+     "\t\t\t\tout->store_buffer(tok.ptr(), tok.size());\n"
+     "\t\t\t\tout.unref();\n"
+     "\t\t\t\tprintf(\"tokenized %s (%d bytes)\\n\", f.utf8().get_data(), tok.size());\n"
+     "\t\t\t\tdone++;\n"
+     "\t\t\t}\n\t\t}\n\t}\n"
+     "\tprintf(\"MISTER_GD_TOKENIZE: %d written, %d failed\\n\", done, failed);\n"
+     "\tfflush(stdout);\n\tfflush(stderr);\n"
+     "\t_exit(failed ? 1 : 0);\n"
+     "}\n\n"
+     "void initialize_gdscript_module(ModuleInitializationLevel p_level) {\n")
+edit(GR, "mister_tokenize_mode(); // MISTER",
+     "\t\tGDScriptUtilityFunctions::register_functions();\n\t}\n",
+     "\t\tGDScriptUtilityFunctions::register_functions();\n\t\tmister_tokenize_mode(); // MISTER: exits when MISTER_GD_TOKENIZE is set.\n\t}\n")
+edit(GR, "#include <unistd.h> // MISTER",
+     '#include "core/io/resource_loader.h"\n',
+     '#include "core/io/resource_loader.h"\n\n#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h> // MISTER: tokenize mode\n')
+
+# ---- GL query dump (PLAN §6.27, null-GL groundwork) ----
+# With MISTER_BOOTLOG set, Config logs what the real GL driver (Mesa llvmpipe)
+# answered: strings, extensions and limits. The null GL replays these answers.
+GCF = "drivers/gles3/storage/config.cpp"
+edit(GCF, "void mister_bootlog(const char",
+     '#include "config.h"\n',
+     '#include "config.h"\n\nbool mister_bootlog_on(); // MISTER: core/os/os.cpp\nvoid mister_bootlog(const char *p_fmt, ...);\n')
+edit(GCF, 'mister_bootlog("gl version',
+     "\tglGetIntegerv(GL_MAX_SAMPLES, &msaa_max_samples);\n",
+     "\tglGetIntegerv(GL_MAX_SAMPLES, &msaa_max_samples);\n"
+     "\tif (mister_bootlog_on()) { // MISTER: the null GL replays these answers.\n"
+     "\t\tmister_bootlog(\"gl version=%s|renderer=%s|vendor=%s|glsl=%s\", (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VENDOR), (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION));\n"
+     "\t\tGLint mf_n = 0;\n\t\tglGetIntegerv(GL_NUM_EXTENSIONS, &mf_n);\n"
+     "\t\tfor (int i = 0; i < mf_n; i++) {\n\t\t\tmister_bootlog(\"gl ext %s\", (const char *)glGetStringi(GL_EXTENSIONS, i));\n\t\t}\n"
+     "\t\tmister_bootlog(\"gl ints num_ext=%d max_vertex_tex_units=%d max_tex_units=%d max_tex_size=%d viewport=%dx%d ubo=%lld samples=%d\", mf_n, max_vertex_texture_image_units, max_texture_image_units, max_texture_size, max_viewport_size[0], max_viewport_size[1], (long long)max_uniform_buffer_size, msaa_max_samples);\n"
+     "\t}\n")
+
+# ---- Null GL in fabric mode (PLAN §6.27) ----
+# drivers/gles3/mister_null_gl.* (copied from src/godot): with MISTER_FABRIC=1
+# glad loads every GL entry point from the null implementation instead of Mesa
+# through EGL; DisplayServerMister skips EGL. MISTER_NULL_GL=0 = Mesa as before.
+RG = "drivers/gles3/rasterizer_gles3.cpp"
+edit(RG, '#include "mister_null_gl.h"',
+     '#include "rasterizer_gles3.h"\n',
+     '#include "rasterizer_gles3.h"\n#include "mister_null_gl.h" // MISTER\n')
+edit(RG, "MisterNullGL::get_proc",
+     "#ifdef GLAD_ENABLED\n\tbool glad_loaded = false;\n",
+     "#ifdef GLAD_ENABLED\n\tbool glad_loaded = false;\n\n"
+     "\t// MISTER: fabric mode draws from CPU-side data; GL is a null implementation (no Mesa).\n"
+     "\tif (!gles_over_gl && MisterNullGL::enabled() && gladLoadGLES2((GLADloadfunc)&MisterNullGL::get_proc)) {\n"
+     "\t\tglad_loaded = true;\n\t}\n")
+
 # ---- Per-tick setters that do full work for unchanged state (PLAN §6.5) ----
 # AnimatedSprite2D::play() validated the name by building, sorting and
 # linearly searching a Vector<String> of every animation name, and always
