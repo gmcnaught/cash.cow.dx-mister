@@ -11,8 +11,9 @@ costs ~11 ms/frame of the 16.7 ms budget. The remaining dips were CPU placement 
 polling daemons sharing CPU0 with the main thread); the release launcher isolates CPU0 for the main thread (PLAN §6.18).
 Every canvas command type the game uses now reaches the fabric (rects, split large rects, polygons; `unhandled: none`).
 A release bundle (`scripts/make_release.sh`) ships a CashCowDX-branded core (`_Other/CashCowDX_*.rbf`, CORENAME `CashCowDX`, Cash Cow
-button labels). Loading it from the core list starts the game (Frontier's Master_Daemon via `_handler.sh`, or our
-`cashcowdx_daemon.sh`, registered by a first run of **Scripts → CashCowDX**); the user supplies the GOG `CashCowDX.pck` (PLAN §6.23).
+button labels). Loading it from the core list starts the game with no daemon: MiSTer.ini `[CashCowDX] main=` (set by
+**Scripts → CashCowDX_CoresMenu**) makes MiSTer exec `MiSTer_CashCowDX` (upstream Main + one hook call, `tools/mister-wrapper/`)
+while this core is loaded; it starts `launch.sh`. The user supplies the GOG `CashCowDX.pck` (PLAN §6.23, §6.24).
 
 ## 2. Decisions already made (don't re-litigate)
 
@@ -37,7 +38,8 @@ src/godot/                        MiSTer platform (display server, audio, joypad
 src/fabric/, src/vendor/          libmisterfabric (C ABI over the vendored mfgpu RasterBackend; deltas in src/vendor/VENDOR.md)
 src/patches/                      runtime GDScript patches + loader (mister_patches.gd); loaded via override.cfg
 tools/mem_wc/                     write-combining /dev/mem driver: build.sh for the device kernel, prebuilt .ko
-dist/                             Scripts/CashCowDX.sh, games/CashCowDX/{launch.sh,_handler.sh,cashcowdx_daemon.sh,override.cfg}, README.md
+dist/                             Scripts/{CashCowDX.sh,CashCowDX_CoresMenu.sh}, games/CashCowDX/{launch.sh,override.cfg}, README.md
+tools/mister-wrapper/             build-hps.sh (upstream Main_MiSTer + overlay/ + one inserted call -> MiSTer_CashCowDX)
 scripts/make_release.sh           assembles build/release/CashCowDX-MiSTer-<tag>.zip (RBF_SRC=<cashcow-variant RBF> required)
 scripts/ (measurement)            ab_play.sh, perf_stat_play.sh, spike_probe.gd, cpu_isolate.sh, soak.sh, joy_inject.py,
                                   tier0_probe.gd, godot_dbg_profile.py, profile_summary.py, sfx_bench.gd, gd_access_bench.gd,
@@ -58,13 +60,15 @@ docker run --rm -v "$PWD/work":/w godot4-armhf-build:bullseye sh -c \
   'arm-linux-gnueabihf-objcopy --strip-debug /w/src/godot-4.3-stable/bin/godot.linuxbsd.template_release.arm32 /w/build/<name>.cortexa9'
 docker run --rm -v "$PWD":/p -w /p/src/fabric godot4-armhf-build:bullseye make OUT=../../work/build/fabric_opt   # library
 tools/mem_wc/build.sh                                  # kernel module for the device's running kernel
+tools/mister-wrapper/build-hps.sh                     # MiSTer_CashCowDX (UPSTREAM_COMMIT=<sha> to move the pin)
 RBF_SRC=work/rbf_cashcow/MalditaCastilla_<date>.rbf scripts/make_release.sh work/build/<name>.cortexa9 <tag>
 ```
 Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script while a subagent is editing `src/godot/`.
 
 ## 5. Device (`root@192.168.20.81`)
 
-- Release install: `/media/fat/games/CashCowDX` (+ `Scripts/CashCowDX.sh`, `_Other/CashCowDX_*.rbf`); logs `/media/fat/logs/CashCowDX/`.
+- Release install: `/media/fat/games/CashCowDX` (+ `Scripts/CashCowDX*.sh`, `_Other/CashCowDX_*.rbf`); logs `/media/fat/logs/CashCowDX/`.
+  `main=` armed in `/media/fat/MiSTer.ini`. State check: `ssh root@192.168.20.81 sh -s < scripts/mainhook_state.sh`.
 - Dev/measurement dir: `/media/fat/games/cashcow` (engines `godot43*.cortexa9`, `patches/`, `patches_typed/`, probes, `run_play.sh`, `ab_play.sh`).
 - Measurement: `PATCH=1 MISTER_SEED=1 MISTER_PATCHES_DIR=.../patches_typed ./ab_play.sh <engine> <tag> <steps>`; add `SPIKES=1` for
   per-frame spike logging; `./perf_stat_play.sh <engine> <tag> 1` for main-thread cycles/frame (the probe's cpu_ms is both cores).

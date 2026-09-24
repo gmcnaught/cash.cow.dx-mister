@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Cash Cow DX on MiSTer — engine launcher. Started when the CashCowDX core loads
-# (cashcowdx_daemon.sh, or MiSTer Frontier's Master_Daemon via _handler.sh), or
-# directly by Scripts/CashCowDX.sh when no core-load daemon runs.
+# Cash Cow DX on MiSTer — engine launcher. Started by MiSTer_CashCowDX when the
+# CashCowDX core loads (MiSTer.ini [CashCowDX] main=, turned on by
+# Scripts/CashCowDX_CoresMenu.sh), or by Scripts/CashCowDX.sh.
 #
 # Engine: Godot 4.3 built for the Cortex-A9 with a MiSTer display server, DDR
 # audio and joystick drivers, and a canvas->FPGA-blitter bridge (the fabric
@@ -30,15 +30,14 @@ RETRY_MARK=/tmp/cashcowdx_fabric_retry
 LOCKDIR=/tmp/cashcowdx-launch.lock
 MAX_RETRIES=4
 
-# Interruptible sleep: a daemon stops this script with SIGTERM then SIGKILL 1 s
-# later, so the TERM trap must run without waiting for a foreground sleep.
+# Interruptible sleep, so a SIGTERM runs the cleanup trap without waiting for a
+# foreground sleep.
 nap() { sleep "$1" & wait $!; }
 
 mkdir -p "$LOGDIR" "$GAMEDIR/data"
 cd "$GAMEDIR" || exit 1
 
-# Only on our core. Frontier's Master_Daemon sees the RBF path change about 1 s
-# before CORENAME on a core switch and spawns the handler once for the old name.
+# Only on our core (e.g. a Scripts run racing a core change).
 if [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$CORENAME" ]; then
 	echo "$(date) launch.sh: core is '$(cat /tmp/CORENAME 2>/dev/null)', not $CORENAME — not starting" >> "$LOGDIR/launch.log"
 	exit 0
@@ -169,9 +168,9 @@ fabric_ok() {
 	[ "$d1" != "$d0" ] || [ "$d1" = "$s1" ]
 }
 
-# Reload the core via the menu core, detached: a core-load daemon kills this
-# script as soon as the core changes. After the reload the daemon starts a new
-# launch.sh; without a daemon the helper starts it.
+# Reload the core via the menu core, from a detached helper. After the reload
+# MiSTer_CashCowDX starts a new launch.sh when main= is on; otherwise the helper
+# starts it.
 reload_core() {
 	local rbf
 	rbf=$(ls -t $RBF_GLOB 2>/dev/null | head -1)
@@ -182,9 +181,9 @@ reload_core() {
 		echo "load_core $1" > /dev/MiSTer_cmd
 		w=0; while [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$2" ] && [ $w -lt 30 ]; do sleep 1; w=$((w+1)); done
 		sleep 2
-		ps -o args 2>/dev/null | grep -qE "[M]aster_Daemon.sh|[c]ashcowdx_daemon.sh" || exec "$3"
-	' reload "$rbf" "$CORENAME" "$0" < /dev/null >> "$LOG" 2>&1 &
-	# Hold until the core is gone, so a daemon doesn't start a launcher on the old core.
+		[ -x "$4" ] && grep -q "^main=$4" /media/fat/MiSTer.ini 2>/dev/null || exec "$3"
+	' reload "$rbf" "$CORENAME" "$0" "$GAMEDIR/MiSTer_CashCowDX" < /dev/null >> "$LOG" 2>&1 &
+	# Hold until the core is gone, so this launcher exits before the reloaded core starts the next one.
 	local waited=0
 	while [ "$(cat /tmp/CORENAME 2>/dev/null)" = "$CORENAME" ] && [ $waited -lt 20 ]; do nap 1; waited=$((waited+1)); done
 }

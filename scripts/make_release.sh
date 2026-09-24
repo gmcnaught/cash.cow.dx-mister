@@ -5,7 +5,8 @@
 # Output: build/release/CashCowDX-MiSTer-<tag>.zip + sha256sums.txt
 # Sources: dist/ (launcher, README, override.cfg), src/patches (runtime GDScript
 # patches), work/build/fabric_opt/libmisterfabric.so, tools/mem_wc/prebuilt,
-# the fabric core RBF and Mesa runtime (fetched from the paths below).
+# the fabric core RBF, Mesa runtime (fetched from the paths below) and the
+# MiSTer_CashCowDX main= wrapper (tools/mister-wrapper/build-hps.sh).
 set -e
 ENGINE=$1; TAG=$2
 [ -f "$ENGINE" ] && [ -n "$TAG" ] || { echo "usage: $0 <engine> <tag>"; exit 1; }
@@ -13,12 +14,16 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # CashCowDX-branded fabric core: maldita.castilla-mister build-rbf.yml, core_variant=cashcow
 # (same RTL as DonutDodo_48k_v224; CORENAME CashCowDX, Cash Cow button labels).
 RBF_SRC=${RBF_SRC:?set RBF_SRC to the CashCowDX-branded RBF (CashCowDX_YYYYMMDD.rbf)}
+WRAPPER=${WRAPPER:-$ROOT/build/mister-wrapper/MiSTer_CashCowDX}
+# A stock Main_MiSTer under this name loads the core and never starts the game.
+grep -q /media/fat/games/CashCowDX/launch.sh "$WRAPPER" 2>/dev/null \
+	|| { echo "$WRAPPER missing or not the hooked build (run tools/mister-wrapper/build-hps.sh)"; exit 1; }
 MESA_SRC=${MESA_SRC:-root@192.168.20.81:/media/fat/games/gmloader/mesa}
 OUT=$ROOT/build/release/CashCowDX-MiSTer-$TAG
 rm -rf "$OUT"; mkdir -p "$OUT/_Other" "$OUT/Scripts" "$OUT/games/CashCowDX/patches" "$OUT/games/CashCowDX/mesa"
-cp "$ROOT/dist/Scripts/CashCowDX.sh" "$OUT/Scripts/"
-cp "$ROOT/dist/games/CashCowDX/launch.sh" "$ROOT/dist/games/CashCowDX/_handler.sh" "$ROOT/dist/games/CashCowDX/cashcowdx_daemon.sh" \
-	"$ROOT/dist/games/CashCowDX/override.cfg" "$OUT/games/CashCowDX/"
+cp "$ROOT/dist/Scripts/CashCowDX.sh" "$ROOT/dist/Scripts/CashCowDX_CoresMenu.sh" "$OUT/Scripts/"
+cp "$ROOT/dist/games/CashCowDX/launch.sh" "$ROOT/dist/games/CashCowDX/override.cfg" "$OUT/games/CashCowDX/"
+cp "$WRAPPER" "$OUT/games/CashCowDX/MiSTer_CashCowDX"
 cp "$ROOT/dist/README.md" "$OUT/games/CashCowDX/README.md"
 cp "$ENGINE" "$OUT/games/CashCowDX/cashcowdx"
 cp "$ROOT/work/build/fabric_opt/libmisterfabric.so" "$OUT/games/CashCowDX/"
@@ -26,8 +31,8 @@ cp "$ROOT"/tools/mem_wc/prebuilt/*.ko "$OUT/games/CashCowDX/"
 for f in "$ROOT"/src/patches/*.gd; do cp "$f" "$OUT/games/CashCowDX/patches/"; done
 cp "$RBF_SRC" "$OUT/_Other/CashCowDX_$(basename "$RBF_SRC" .rbf | grep -oE '[0-9]{8}$').rbf"
 case "$MESA_SRC" in *:*) scp -q "$MESA_SRC/*" "$OUT/games/CashCowDX/mesa/" ;; *) cp "$MESA_SRC"/* "$OUT/games/CashCowDX/mesa/" ;; esac
-chmod +x "$OUT/Scripts/CashCowDX.sh" "$OUT/games/CashCowDX/launch.sh" "$OUT/games/CashCowDX/_handler.sh" \
-	"$OUT/games/CashCowDX/cashcowdx_daemon.sh" "$OUT/games/CashCowDX/cashcowdx"
+chmod +x "$OUT/Scripts/CashCowDX.sh" "$OUT/Scripts/CashCowDX_CoresMenu.sh" "$OUT/games/CashCowDX/launch.sh" \
+	"$OUT/games/CashCowDX/MiSTer_CashCowDX" "$OUT/games/CashCowDX/cashcowdx"
 # Checksums live inside the game folder: extracting over /media/fat must not
 # drop files into the SD root.
 ( cd "$OUT" && find . -type f ! -name sha256sums.txt | sort | xargs shasum -a 256 > games/CashCowDX/sha256sums.txt )

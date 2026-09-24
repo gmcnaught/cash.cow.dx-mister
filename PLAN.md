@@ -960,3 +960,27 @@ Scripts entry registers + starts our daemon -> game; menu -> watchdog stop; core
 running -> exactly 1 launcher, 1 engine. Frontier's Master_Daemon was restarted after the test; device left at MENU.
 Bundle `CashCowDX-MiSTer-20260924b.zip`. Future direction (user): one shared RBF + a per-game MRA (`setname` becomes `/tmp/CORENAME`,
 `user_io.cpp:431`), instead of per-game CONF_STR builds.
+
+### 6.24 Start on core load without a daemon: per-core `main=` wrapper (2026-09-24)
+
+Replaces §6.23's `_handler.sh` + `cashcowdx_daemon.sh`. Mechanism (same as maldita.castilla-mister's `MiSTer_Maldita`): upstream
+Main_MiSTer's per-core ini key `main=` (`cfg.cpp` "MAIN", `user_io.cpp` "core requires exec") makes stock MiSTer exec another Main
+binary while that core is loaded; any other core's section has the default `main=MiSTer`, so loading it execs stock MiSTer again.
+`[CashCowDX] main=/media/fat/games/CashCowDX/MiSTer_CashCowDX`, set/cleared by `Scripts/CashCowDX_CoresMenu.sh` (backs up MiSTer.ini;
+refuses a binary without the hook string). `MiSTer_CashCowDX` = upstream Main_MiSTer + `tools/mister-wrapper/overlay/cashcow_{hook,child}`
++ one call `cashcow_hook_poll()` after `scheduler_wait_fpga_ready()` in `scheduler_co_poll()` (Maldita measured spawning before that
+wait: 3/5 frame-1 wedges; after: 0/5). The hook spawns `launch.sh` once per exec (setsid, log `launch.log`), `NOENGINE` flag to skip.
+**No vendored upstream file:** `build-hps.sh` inserts the call at build time on an anchor and uses upstream's Makefile with `PRJ`
+renamed; either anchor missing fails the build. Pin `3380931` (Maldita's). Current upstream master `aa271e4`: the insert applies, but
+the build fails in upstream's own `scaler.cpp` (`mister_scaler_read` default argument redeclared) with the Debian bullseye gcc — not
+caused by the hook; pin kept.
+`Scripts/CashCowDX.sh` now removes the old watcher (process, `user-startup.sh` line, `_handler.sh`, which Master_Daemon would run as a
+second engine); with `main=` on it only loads the core. `launch.sh` reload helper starts the next launcher itself only when `main=` is off.
+Release: `make_release.sh` ships the wrapper + toggle, requires the hook string in the wrapper; bundle `CashCowDX-MiSTer-20260924c.zip`.
+Device tests on .81 (Master_Daemon + Solarus daemon running throughout), `work/tier0/mainhook/{switch,disarm}_test.txt`, all pass:
+armed load -> `/proc/<MiSTer>/exe` = MiSTer_CashCowDX, 1 launch.sh, 1 engine, C_DONE +~63/s, attract screen
+(`work/tier0/mainhook/armed_load.png`); game -> menu, game -> NES: stock `/media/fat/MiSTer`, 0 engines, USB IRQ mask 3, CPU masks
+restored; menu -> game, NES -> game, repeat: 1/1 each time; same core reloaded over itself: the new launcher stands down on the lock and
+the running engine continues (C_DONE advancing); disarmed load: stock Main, 0 engines; disarmed Scripts entry: 1/1; re-arm re-enables
+the commented line (one `[CashCowDX]` section). Not tested: OSD and a real controller under MiSTer_CashCowDX (needs a person);
+MGL `setname` on the shared RBF selecting the `[CashCowDX]` section. Device left armed, game running.
