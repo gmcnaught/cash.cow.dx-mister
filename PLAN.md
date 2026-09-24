@@ -910,3 +910,19 @@ restored. The submit timeouts logged between the core change and the watchdog ar
 Fix after the smoke test: engine threads created after the main thread pinned itself (inherited CPU0) are moved to CPU1 by `cpu_isolate`.
 **Soak** (`scripts/soak.sh 30`, `work/tier0/aj/soak30.txt`): 30/30 minutes engine alive and C_DONE advancing (~3,550 frames/min, ~59 fps
 against the 60 fps pacing cap), no wedge, clean exit on core change, all affinities restored (only Main_MiSTer at its own mask 2).
+
+### 6.21 Release checks that don't need a human (2026-09-24)
+
+**Scanout crop — keep the core's 224-line window.** The core deliberately scans framebuffer rows 7–230 (Genesis V28 active height, the
+area a consumer CRT shows; commit 82870b8 in maldita.castilla-mister; 240->224 scaling was tried and reverted, aa90ce2/3d853ad: text looked
+squashed). Cash Cow check (full 320x240 frame read from the fabric's DDR scanout buffer at 0x3BF40040 during level play, aligned to the
+screenshot at shift 7 — `work/tier0/aj/fbdump.bin`, `crop_rows.png`): the HUD text occupies rows 9–23 (fully visible); rows 0–6 hold only
+the top edge of the level art; rows 231–239 hold the floor edge (the lower 2 rows of the floor spikes, the lower half of the bottom
+platform). Nothing gameplay-critical is cropped.
+**Controller.** The press path is proven in two halves: donut.dodo measured the core's joystick word at 0x3BF40008 changing under real
+presses on this device (its patch 0005, 2026-08-24), and our engine's read of a DDR joystick word -> Godot input is the exact code path
+every scripted run exercised (only the base address differs). Feel and preferred OSD mapping remain a human check.
+**Audio.** During level play (release install, `godot43rc`): engine writes 47,920 frames/s, the FPGA consumes 47,923 frames/s (48 kHz within
+0.2%) — sound is being played. Content: RMS 11,211 (~-9 dBFS), 1.8% of samples at full scale. Godot clamps the float mix to +/-1.0 and
+scales to 31 bits (`audio_server.cpp:302-310`), and the driver's `>> 16` maps that to exactly +32767/-32768, so the path is unity gain;
+the full-scale samples are the game's own mix hitting Godot's standard clamp, as on PC. Listening remains a human check.

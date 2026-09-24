@@ -29,6 +29,8 @@ Start pauses.
 
 ## Notes
 
+- The core shows the 224 lines a CRT displays (rows 7–230 of the game's 240); only the top edge of the level art and the bottom
+  floor edge are outside the picture — the HUD and all gameplay are visible.
 - Saves and settings go to `games/CashCowDX/data/`.
 - Logs: `/media/fat/logs/CashCowDX/` (`launch.log`, `cashcowdx.log`, and `cashcowdx.prev.log` from the previous run).
 - `mem_wc-<kernel>.ko` gives the blitter a faster (write-combining) DDR mapping. It is loaded only if it matches the
