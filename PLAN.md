@@ -937,3 +937,26 @@ loads levels (threaded `ResourceLoader`, deferred gold spawning) — a game-beha
 User-verified on the device with the release install: the game loads via **Scripts → CashCowDX**; audio plays correctly; game
 controls work as expected. This closes the human checks left open in §6.21 (controller feel/mapping, listening). Release candidate
 `CashCowDX-MiSTer-20260924.zip` (§6.20) has no open blockers.
+
+### 6.23 Own core identity and start-on-core-load (2026-09-24)
+
+Gap reported by the user: the shipped RBF identified as `DonutDodo` (Donut Dodo's CONF_STR name and button labels) and selecting it
+from the core list started nothing. Fix, in two parts:
+**Branded RBF.** maldita.castilla-mister (branch `donutdodo/fb-320x240`, where the shared fabric core is built) `44af13a`: a
+`CASHCOW_CORE` macro switches the CONF_STR name to `CashCowDX` and J1 to `Jump/OK,Back,Unused X,Unused Y,Start,Select,Unused L,Unused R`
+(jn unchanged: bottom = Jump/OK, right = Back); RTL identical. `build-rbf.yml` input `core_variant=cashcow` defines it. The build moved
+the known `pll_hdmi` (`yc_out`) setup path to -0.168 ns; the gate now accepts that domain under the same -0.20 ns baseline (`632b83d`).
+Seed 2 regressed `emu|pll` to -0.493 (rejected). Shipped: run 36003890841 (seed 1), `CashCowDX_20260924.rbf`, sha1 `5504e08f…`.
+Device: `/tmp/CORENAME` and `/tmp/RBFNAME` read `CashCowDX`; screenshots file under `CashCowDX/`.
+**Start on core load.** `games/CashCowDX/_handler.sh` (MiSTer Frontier's Master_Daemon runs it when CORENAME=CashCowDX) and
+`cashcowdx_daemon.sh` (our own watcher for devices without Frontier; passive while Master_Daemon runs; registered in
+`linux/user-startup.sh` by `Scripts/CashCowDX.sh` on first run). `launch.sh` changes: CORENAME `CashCowDX`; interruptible sleeps so the
+TERM trap runs inside Frontier's 1 s SIGTERM->SIGKILL window; engine kill + CPU restore run in the background so a SIGKILL can't skip
+them; the core-reload retry is a detached helper (a daemon kills the launcher when the core changes); exits at once unless the loaded
+core is CashCowDX (Master_Daemon sees the RBF path change ~1 s before CORENAME and spawns the handler once for the outgoing core).
+Device tests (all pass): core load with Frontier -> handler -> engine, fabric gate advancing, title screen
+(`work/tier0/aj/branded_core_boot.png`); core change -> engine stopped, `cpu: restored`, USB IRQ mask 3; Frontier stopped ->
+Scripts entry registers + starts our daemon -> game; menu -> watchdog stop; core load -> our daemon starts the game; both daemons
+running -> exactly 1 launcher, 1 engine. Frontier's Master_Daemon was restarted after the test; device left at MENU.
+Bundle `CashCowDX-MiSTer-20260924b.zip`. Future direction (user): one shared RBF + a per-game MRA (`setname` becomes `/tmp/CORENAME`,
+`user_io.cpp:431`), instead of per-game CONF_STR builds.

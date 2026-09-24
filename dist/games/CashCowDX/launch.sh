@@ -1,6 +1,8 @@
 #!/bin/bash
 #
-# Cash Cow DX on MiSTer — engine launcher (started by Scripts/CashCowDX.sh).
+# Cash Cow DX on MiSTer — engine launcher. Started when the CashCowDX core loads
+# (cashcowdx_daemon.sh, or MiSTer Frontier's Master_Daemon via _handler.sh), or
+# directly by Scripts/CashCowDX.sh when no core-load daemon runs.
 #
 # Engine: Godot 4.3 built for the Cortex-A9 with a MiSTer display server, DDR
 # audio and joystick drivers, and a canvas->FPGA-blitter bridge (the fabric
@@ -19,7 +21,7 @@ set -u
 GAMEDIR=/media/fat/games/CashCowDX
 LOGDIR=/media/fat/logs/CashCowDX
 LOG="$LOGDIR/cashcowdx.log"
-CORENAME=DonutDodo
+CORENAME=CashCowDX
 RBF_GLOB="/media/fat/_Other/CashCowDX_*.rbf"
 ENGINE=cashcowdx
 FABRIC_CTRL=0x3B000000      # C_SUBMIT
@@ -28,8 +30,19 @@ RETRY_MARK=/tmp/cashcowdx_fabric_retry
 LOCKDIR=/tmp/cashcowdx-launch.lock
 MAX_RETRIES=4
 
+# Interruptible sleep: a daemon stops this script with SIGTERM then SIGKILL 1 s
+# later, so the TERM trap must run without waiting for a foreground sleep.
+nap() { sleep "$1" & wait $!; }
+
 mkdir -p "$LOGDIR" "$GAMEDIR/data"
 cd "$GAMEDIR" || exit 1
+
+# Only on our core. Frontier's Master_Daemon sees the RBF path change about 1 s
+# before CORENAME on a core switch and spawns the handler once for the old name.
+if [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$CORENAME" ]; then
+	echo "$(date) launch.sh: core is '$(cat /tmp/CORENAME 2>/dev/null)', not $CORENAME — not starting" >> "$LOGDIR/launch.log"
+	exit 0
+fi
 
 # --- one launcher / one engine -------------------------------------------------
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
@@ -58,9 +71,9 @@ echo "=== $(date) launch.sh (pid $$) CORENAME='$(cat /tmp/CORENAME 2>/dev/null)'
 waited=0
 while v=$(busybox devmem 0xFF706014 32 2>/dev/null) && [ -n "$v" ] && [ $((v & 0x80000000)) -ne 0 ]; do
 	[ "$waited" -ge 20 ] && { echo "FPGA still not ready after 20s — starting anyway"; break; }
-	sleep 1; waited=$((waited + 1))
+	nap 1; waited=$((waited + 1))
 done
-sleep 1
+nap 1
 
 # --- mem_wc (optional; the fabric library falls back to /dev/mem) -------------
 # Load only if nothing has: never rmmod a mem_wc — a process can keep a live
@@ -112,9 +125,11 @@ cpu_restore() {
 
 engine_pid=""
 cleanup() {
-	[ -n "$engine_pid" ] && kill "$engine_pid" 2>/dev/null
-	cpu_restore
+	# Background: a SIGKILL of this script must not skip the engine kill or the restore.
+	[ -n "$engine_pid" ] && { kill "$engine_pid" 2>/dev/null; ( sleep 2; kill -9 "$engine_pid" 2>/dev/null ) & }
+	cpu_restore &
 	rm -rf "$LOCKDIR"
+	wait
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
@@ -148,21 +163,30 @@ start_engine() {
 # Blitter still retiring work? (done advances, or nothing is outstanding)
 fabric_ok() {
 	local d0 d1 s1
-	d0=$(busybox devmem $FABRIC_DONE 32 2>/dev/null); sleep 8
+	d0=$(busybox devmem $FABRIC_DONE 32 2>/dev/null); nap 8
 	d1=$(busybox devmem $FABRIC_DONE 32 2>/dev/null); s1=$(busybox devmem $FABRIC_CTRL 32 2>/dev/null)
 	echo "fabric gate: done $d0 -> $d1 (submit $s1)"
 	[ "$d1" != "$d0" ] || [ "$d1" = "$s1" ]
 }
 
+# Reload the core via the menu core, detached: a core-load daemon kills this
+# script as soon as the core changes. After the reload the daemon starts a new
+# launch.sh; without a daemon the helper starts it.
 reload_core() {
-	local rbf waited
+	local rbf
 	rbf=$(ls -t $RBF_GLOB 2>/dev/null | head -1)
 	[ -n "$rbf" ] && [ -p /dev/MiSTer_cmd ] || return 1
-	echo "load_core /media/fat/menu.rbf" > /dev/MiSTer_cmd
-	waited=0; while [ "$(cat /tmp/CORENAME 2>/dev/null)" != "MENU" ] && [ $waited -lt 20 ]; do sleep 1; waited=$((waited+1)); done
-	echo "load_core $rbf" > /dev/MiSTer_cmd
-	waited=0; while [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$CORENAME" ] && [ $waited -lt 30 ]; do sleep 1; waited=$((waited+1)); done
-	sleep 2
+	setsid sh -c '
+		echo "load_core /media/fat/menu.rbf" > /dev/MiSTer_cmd
+		w=0; while [ "$(cat /tmp/CORENAME 2>/dev/null)" != MENU ] && [ $w -lt 20 ]; do sleep 1; w=$((w+1)); done
+		echo "load_core $1" > /dev/MiSTer_cmd
+		w=0; while [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$2" ] && [ $w -lt 30 ]; do sleep 1; w=$((w+1)); done
+		sleep 2
+		ps -o args 2>/dev/null | grep -qE "[M]aster_Daemon.sh|[c]ashcowdx_daemon.sh" || exec "$3"
+	' reload "$rbf" "$CORENAME" "$0" < /dev/null >> "$LOG" 2>&1 &
+	# Hold until the core is gone, so a daemon doesn't start a launcher on the old core.
+	local waited=0
+	while [ "$(cat /tmp/CORENAME 2>/dev/null)" = "$CORENAME" ] && [ $waited -lt 20 ]; do nap 1; waited=$((waited+1)); done
 }
 
 attempt=$(cat "$RETRY_MARK" 2>/dev/null); case "$attempt" in ''|*[!0-9]*) attempt=0 ;; esac
@@ -171,17 +195,17 @@ start_engine
 waited=0
 while [ $waited -lt 60 ] && ! grep -q "fabric bring-up" "$LOG" 2>/dev/null; do
 	kill -0 "$engine_pid" 2>/dev/null || { echo "engine exited during start-up"; exit 1; }
-	sleep 1; waited=$((waited + 1))
+	nap 1; waited=$((waited + 1))
 done
 cpu_isolate
 if ! fabric_ok; then
 	if [ "$attempt" -lt "$MAX_RETRIES" ]; then
 		echo $((attempt + 1)) > "$RETRY_MARK"
 		echo "fabric gate: WEDGED — reloading the core, attempt $((attempt + 1))/$MAX_RETRIES"
-		kill "$engine_pid" 2>/dev/null; sleep 2; kill -9 "$engine_pid" 2>/dev/null; engine_pid=""
+		kill "$engine_pid" 2>/dev/null; nap 2; kill -9 "$engine_pid" 2>/dev/null; engine_pid=""
 		cpu_restore
-		rm -rf "$LOCKDIR"; trap - EXIT
-		reload_core && exec "$0"
+		rm -rf "$LOCKDIR"
+		reload_core
 		exit 1
 	fi
 	echo "fabric gate: still wedged after $attempt attempts — leaving the engine running"
@@ -192,10 +216,10 @@ rm -f "$RETRY_MARK"
 while kill -0 "$engine_pid" 2>/dev/null; do
 	if [ "$(cat /tmp/CORENAME 2>/dev/null)" != "$CORENAME" ]; then
 		echo "watchdog: core changed to '$(cat /tmp/CORENAME 2>/dev/null)' — stopping the engine"
-		kill "$engine_pid" 2>/dev/null; sleep 2; kill -9 "$engine_pid" 2>/dev/null
+		kill "$engine_pid" 2>/dev/null; nap 2; kill -9 "$engine_pid" 2>/dev/null
 		break
 	fi
-	sleep 1
+	nap 1
 done
 wait "$engine_pid" 2>/dev/null
 echo "engine: exited ($?)"
