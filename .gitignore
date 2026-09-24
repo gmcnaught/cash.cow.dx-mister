@@ -1,0 +1,10 @@
+# Regenerable build trees, logs, decompiled game source (see HANDOFF.md §3)
+/work/
+# The original game files — copyrighted, never committed
+/gamedata/
+*.pck
+# Release output (scripts/make_release.sh)
+/build/
+# Local session tooling
+/.remember/
+.DS_Store

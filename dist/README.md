@@ -1,0 +1,44 @@
+# Cash Cow DX for MiSTer
+
+Cash Cow DX (Godot 4.3) running on the MiSTer DE10-Nano: the game logic runs on the ARM cores, and every frame is
+drawn by an FPGA blitter core. Audio and the joystick go through the core as well.
+
+**The game itself is not included.** You need your own copy of the **GOG** release of Cash Cow DX.
+
+## Install
+
+1. Extract this zip over the root of your MiSTer SD card (`/media/fat/`). It adds:
+   - `_Other/CashCowDX_<date>.rbf` — the FPGA core (the shared Godot/GameMaker blitter core; its OSD shows "DonutDodo")
+   - `Scripts/CashCowDX.sh` — the menu entry that starts the game
+   - `games/CashCowDX/` — the engine, its runtime and the launcher
+2. Copy **`CashCowDX.pck`** from your GOG install to `/media/fat/games/CashCowDX/CashCowDX.pck`.
+   - GOG Linux installer: `data/noarch/game/CashCowDX.pck` inside the installer (e.g. extract with `innoextract`/`unzip`),
+     or the file next to the game executable in an installed copy.
+   - The file this port was tested with has SHA-256 `4436b7509cab462f3efb1c56a0aba2997407ace231f6a16c35f4b1796d2d5b6c`.
+3. Start it from the MiSTer menu: **Scripts → CashCowDX**. The script loads the core and starts the game;
+   selecting the core from the Cores menu alone only loads the bitstream.
+
+To quit, load another core from the OSD; the launcher stops the game when the core changes.
+
+## Controls
+
+The game reads the joystick through the core, so the MiSTer OSD button mapping for this core applies
+(**OSD → Define joystick buttons**). Buttons in order: **Jump/OK, Back, Unused, Options, Start, Select/Coin, L, R**.
+Start pauses.
+
+## Notes
+
+- Saves and settings go to `games/CashCowDX/data/`.
+- Logs: `/media/fat/logs/CashCowDX/` (`launch.log`, `cashcowdx.log`, and `cashcowdx.prev.log` from the previous run).
+- `mem_wc-<kernel>.ko` gives the blitter a faster (write-combining) DDR mapping. It is loaded only if it matches the
+  running kernel (`uname -r`) and nothing else has loaded one; otherwise the game runs with the slower mapping.
+  It stays loaded until reboot by design.
+- While the game runs, the launcher keeps CPU core 0 for the game's main thread and moves USB interrupt handling and
+  other programs to core 1; everything is put back when the game exits.
+- Only one blitter-core game can run at a time; starting this one stops any other.
+
+## Credits and licences
+
+- Cash Cow DX © its developers; not distributed here.
+- Godot Engine 4.3 (MIT) with MiSTer changes; Mesa, libdrm (MIT); libtinfo (ncurses licence).
+- `mem_wc` driver: GPL-2.0, from skmp/minicast (source in the port's repository under `tools/mem_wc/`).

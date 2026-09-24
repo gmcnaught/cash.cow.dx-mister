@@ -1,0 +1,36 @@
+# armhf (ARMv7-A / Cortex-A9) cross-build image for Godot 4.3.
+# Debian bullseye: glibc 2.31 == MiSTer's glibc; GCC 10 (Godot 4.3 needs >= 9).
+# Godot 4.3 linuxbsd dlopens its system libraries (use_sowrap=yes, bundled
+# headers), so no armhf -dev packages are needed.
+FROM debian:bullseye
+
+# bullseye is past EOL and deb.debian.org's debian-security pool 404s. Use the
+# snapshot URLs the image ships (commented out) - pinned and reproducible.
+RUN sed -i -e 's|^deb http://deb.debian.org.*||' -e 's|^# deb http://snapshot|deb [check-valid-until=no] http://snapshot|' \
+        /etc/apt/sources.list
+
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+        crossbuild-essential-armhf python3 pkg-config curl \
+        binutils-arm-linux-gnueabihf file ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# SCons from the PyPI wheel, unpacked without pip (hash-pinned).
+RUN mkdir -p /opt/scons && cd /opt/scons && \
+    curl -sSLo scons.whl https://files.pythonhosted.org/packages/a1/a9/a160614f5630192e51bc6e35127d5b39ea6c457f07bc5e34063776370d0e/SCons-4.5.2-py3-none-any.whl && \
+    echo "2f66a1c5c485068a496c12356583eefb2d79e17177278c7334b12b460f0503ce  scons.whl" | sha256sum -c - && \
+    python3 -m zipfile -e scons.whl . && rm scons.whl && \
+    printf '#!/bin/sh\nPYTHONPATH=/opt/scons exec python3 -c "import SCons.Script; SCons.Script.main()" "$@"\n' > /usr/local/bin/scons && \
+    chmod +x /usr/local/bin/scons
+
+# SCons exposes CC/CXX but not AR/RANLIB; put the cross binutils first in PATH.
+# With production=yes (GCC LTO) Godot 4.3 hardcodes AR=gcc-ar / RANLIB=gcc-ranlib
+# (platform/linuxbsd/detect.py:204), so map those to the cross LTO wrappers too.
+RUN mkdir -p /opt/cross/bin && \
+    for t in ar ranlib nm strip objcopy; do \
+        ln -s /usr/bin/arm-linux-gnueabihf-$t /opt/cross/bin/$t; done && \
+    for t in gcc-ar gcc-ranlib gcc-nm; do \
+        ln -s /usr/bin/arm-linux-gnueabihf-$t /opt/cross/bin/$t; done
+ENV PATH=/opt/cross/bin:$PATH
+
+WORKDIR /src
