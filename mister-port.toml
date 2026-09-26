@@ -1,0 +1,39 @@
+# Cash Cow DX device files, rendered by mister-hybrid-platform:
+#   python3 external/mister-hybrid-platform/tools/mister_platform.py render mister-port.toml --out <sd-root>
+# (scripts/make_release.sh does this). Generated: games/CashCowDX/launch.sh +
+# platform/, Scripts/CashCowDX{,_CoresMenu}.sh, linux/hybrid.d/CashCowDX.conf,
+# linux/MiSTer_hybrid, _Other/CashCowDX.mgl.
+[port]
+name     = "CashCowDX"
+title    = "Cash Cow DX"
+profile  = "gm-fabric"
+engine   = "godot4"
+
+[launch]
+process       = "cashcowdx"
+# libmisterfabric paces on the core's scanout frame counter, so Godot's own
+# limiter is off (--max-fps 0): two pacers drifted against the scanout (PLAN §6.25).
+command       = ["./cashcowdx", "--display-driver", "mister", "--rendering-driver", "opengl3_es",
+                 "--audio-driver", "MiSTer", "--max-fps", "${CASHCOW_MAX_FPS:-0}",
+                 "--main-pack", "CashCowDX.pck"]
+ready_pattern = "fabric bring-up"
+
+[launch.env]
+MISTER_FABRIC      = "1"
+MISTER_FABRIC_LIB  = "$MH_GAMEDIR/libmisterfabric.so"
+GMLOADER_RASTER    = "mfgpu"
+MISTER_JOY         = "1"
+# Region base (0x3BF40000); the engine adds the P1/P2 word offsets. CASHCOW_JOY_BASE
+# is a test hook (scripts/joy_inject.py writes an unused DDR page).
+MISTER_JOY_BASE    = "${CASHCOW_JOY_BASE:-$MISTER_GM_FABRIC_FB_BASE}"
+MISTER_PATCHES_DIR = "$MH_GAMEDIR/patches"
+MISTER_PIN_MAIN    = "0"      # the engine starts on CPU1 (taskset 2); main moves to CPU0
+MISTER_PIN_AUDIO   = "1"
+GODOT_SILENCE_ROOT_WARNING = "1"
+XDG_DATA_HOME      = "$MH_GAMEDIR/data"
+XDG_CONFIG_HOME    = "$MH_GAMEDIR/data"
+
+[scripts]
+required_files = [ ["CashCowDX.pck", "copy it from your GOG install (see README.md)"] ]
+legacy_main    = ["/media/fat/games/CashCowDX/MiSTer_CashCowDX"]
+extra          = "dist/scripts-extra.sh"

@@ -13,8 +13,10 @@ Stutter target (≥58 displayed fps per second, ≤58 at most once per 30 s) mea
 Every canvas command type the game uses now reaches the fabric (rects, split large rects, polygons; `unhandled: none`).
 A release bundle (`scripts/make_release.sh`) ships a CashCowDX-branded core (`_Other/CashCowDX_*.rbf`, CORENAME `CashCowDX`, Cash Cow
 button labels). Loading it from the core list starts the game with no daemon: MiSTer.ini `[CashCowDX] main=` (set by
-**Scripts → CashCowDX_CoresMenu**) makes MiSTer exec `MiSTer_CashCowDX` (upstream Main + one hook call, `tools/mister-wrapper/`)
-while this core is loaded; it starts `launch.sh`. The user supplies the GOG `CashCowDX.pck` (PLAN §6.23, §6.24).
+**Scripts → CashCowDX_CoresMenu**) makes MiSTer exec the shared `MiSTer_hybrid` (upstream Main + one hook call, from the
+`external/mister-hybrid-platform` submodule) while this core is loaded; it starts the `launch.sh` named in
+`linux/hybrid.d/CashCowDX.conf`. `launch.sh`, the Scripts entries and the registry entry are rendered from `mister-port.toml`
+(PLAN §6.28). The user supplies the GOG `CashCowDX.pck` (PLAN §6.23, §6.24).
 Current release: `CashCowDX-MiSTer-20260924e` (engine `godot43pn`): core load → attract 8.75 s warm / 12.0 s cold (PLAN §6.26–6.27); human hardware check passed.
 
 ## 2. Decisions already made (don't re-litigate)
@@ -27,7 +29,7 @@ Current release: `CashCowDX-MiSTer-20260924e` (engine `godot43pn`): core load �
 | Behaviour-preserving changes only; game-behaviour trade-offs need sign-off (e.g. direction-only raycasts, §6.15) | — |
 | `--render-thread separate` is slower on the fabric path | PLAN §6.5 |
 | GDScript inline property cache: kept but OFF (`MISTER_GD_CACHE=1`); no measured gain, one spiral seen with it | PLAN §6.16 |
-| mem_wc: load if absent, **never rmmod** | `tools/mem_wc/README.md` |
+| mem_wc: load if absent, **never rmmod** | platform `device/mem_wc/README.md` |
 | One frame pacer: the scanout counter (not Godot's limiter, not a wall clock); success is counted in *displayed* frames | PLAN §6.25 |
 | Pass/fail stutter runs use `PERF_ON=0`; the perf trace perturbs the device (tmpfs memory, SD I/O) | PLAN §6.25 |
 | Core RBF: maldita.castilla-mister `build-rbf.yml` `core_variant=cashcow` (same RTL as DonutDodo); next time prefer shared RBF + MRA | PLAN §6.23 |
@@ -45,9 +47,9 @@ scripts/apply_godot_mister.py    copies src/godot/** into the Godot tree + all a
 src/godot/                        MiSTer platform (display server, audio, joypad), fabric bridge, GDScript cache
 src/fabric/, src/vendor/          libmisterfabric (C ABI over the vendored mfgpu RasterBackend; deltas in src/vendor/VENDOR.md)
 src/patches/                      runtime GDScript patches + loader (mister_patches.gd); loaded via override.cfg
-tools/mem_wc/                     write-combining /dev/mem driver: build.sh for the device kernel, prebuilt .ko
-dist/                             Scripts/{CashCowDX.sh,CashCowDX_CoresMenu.sh}, games/CashCowDX/{launch.sh,override.cfg}, README.md
-tools/mister-wrapper/             build-hps.sh (upstream Main_MiSTer + overlay/ + one inserted call -> MiSTer_CashCowDX)
+mister-port.toml                  launcher + device files, rendered by the platform (engine argv/env, ready line, legacy_main)
+dist/                             games/CashCowDX/override.cfg, README.md, scripts-extra.sh (upgrade clean-up in the Scripts entry)
+external/mister-hybrid-platform/  submodule: launch_lib.sh, MiSTer_hybrid main= hook, mem_wc (source + prebuilt .ko), DDR-map spec
 scripts/make_release.sh           assembles build/release/CashCowDX-MiSTer-<tag>.zip (RBF_SRC=<cashcow-variant RBF> required)
 scripts/stutter/                  run.sh (device capture of the installed release), frames.py (analysis), state_probe.gd
 scripts/boot/                     boot_time.sh (device: core load -> attract timing, MISTER_BOOTLOG), boot_report.py, prof_phases.py, load_self.py
@@ -71,8 +73,8 @@ docker run --rm -v "$PWD/work/src":/src godot4-armhf-build:bullseye sh -c "cd go
 docker run --rm -v "$PWD/work":/w godot4-armhf-build:bullseye sh -c \
   'arm-linux-gnueabihf-objcopy --strip-debug /w/src/godot-4.3-stable/bin/godot.linuxbsd.template_release.arm32 /w/build/<name>.cortexa9'
 docker run --rm -v "$PWD":/p -w /p/src/fabric godot4-armhf-build:bullseye make OUT=../../work/build/fabric_opt   # library
-tools/mem_wc/build.sh                                  # kernel module for the device's running kernel
-tools/mister-wrapper/build-hps.sh                     # MiSTer_CashCowDX (UPSTREAM_COMMIT=<sha> to move the pin)
+external/mister-hybrid-platform/device/mem_wc/build.sh           # kernel module for a new device kernel
+external/mister-hybrid-platform/device/main-hook/build-hps.sh    # MiSTer_hybrid (or the platform CI artifact)
 RBF_SRC=work/rbf_cashcow/MalditaCastilla_<date>.rbf scripts/make_release.sh work/build/<name>.cortexa9 <tag>
 ```
 Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script while a subagent is editing `src/godot/`.
@@ -103,6 +105,6 @@ Incremental LTO builds take ~7 min, full ~14 min. Don't run the apply script whi
 
 - Fabric wedge: the launcher's gate reloads the core and retries if C_DONE stops advancing after start; long-run behaviour is what the
   soak measures.
-- mem_wc is built per kernel version; on a different MiSTer kernel the launcher falls back to the slower mapping (`tools/mem_wc/build.sh`).
+- mem_wc is built per kernel version; on a different MiSTer kernel the launcher falls back to the slower mapping (platform `device/mem_wc/build.sh`).
 - CPU isolation moves other user processes to CPU1 during play and restores them on exit (trap); a hard kill of the launcher would skip
   the restore (a reboot clears it).

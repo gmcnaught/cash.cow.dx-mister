@@ -3,10 +3,12 @@
 #   scripts/make_release.sh <engine binary> <tag>
 # e.g. scripts/make_release.sh work/build/godot43rc.cortexa9 20260924
 # Output: build/release/CashCowDX-MiSTer-<tag>.zip + sha256sums.txt
-# Sources: dist/ (launcher, README, override.cfg), src/patches (runtime GDScript
-# patches), work/build/fabric_opt/libmisterfabric.so, tools/mem_wc/prebuilt,
-# the fabric core RBF and the
-# MiSTer_CashCowDX main= wrapper (tools/mister-wrapper/build-hps.sh).
+# Sources: mister-port.toml rendered by external/mister-hybrid-platform (launcher,
+# platform/, Scripts entries, hybrid.d registry entry, MGL, mem_wc modules and the
+# shared MiSTer_hybrid main= hook), dist/ (README, override.cfg), src/patches
+# (runtime GDScript patches), libmisterfabric.so (FABRIC_LIB, default
+# work/build/fabric_opt/libmisterfabric.so) and the
+# fabric core RBF.
 # The patches ship as binary tokens (.gdc): TOK_HOST (default the dev MiSTer)
 # runs the release engine once in MISTER_GD_TOKENIZE mode, so the token format
 # matches the shipped engine. It needs the game pck at TOK_PCK.
@@ -17,20 +19,19 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # CashCowDX-branded fabric core: maldita.castilla-mister build-rbf.yml, core_variant=cashcow
 # (same RTL as DonutDodo_48k_v224; CORENAME CashCowDX, Cash Cow button labels).
 RBF_SRC=${RBF_SRC:?set RBF_SRC to the CashCowDX-branded RBF (CashCowDX_YYYYMMDD.rbf)}
-WRAPPER=${WRAPPER:-$ROOT/build/mister-wrapper/MiSTer_CashCowDX}
+PLAT=$ROOT/external/mister-hybrid-platform
+# MiSTer_hybrid: the platform CI artifact, or $PLAT/device/main-hook/build-hps.sh.
+HOOK_BIN=${HOOK_BIN:-$PLAT/build/main-hook/MiSTer_hybrid}
 # A stock Main_MiSTer under this name loads the core and never starts the game.
-grep -q /media/fat/games/CashCowDX/launch.sh "$WRAPPER" 2>/dev/null \
-	|| { echo "$WRAPPER missing or not the hooked build (run tools/mister-wrapper/build-hps.sh)"; exit 1; }
+grep -q /media/fat/linux/hybrid.d "$HOOK_BIN" 2>/dev/null \
+	|| { echo "$HOOK_BIN missing or not the hooked build (run $PLAT/device/main-hook/build-hps.sh)"; exit 1; }
 OUT=$ROOT/build/release/CashCowDX-MiSTer-$TAG
-rm -rf "$OUT"; mkdir -p "$OUT/_Other" "$OUT/Scripts" "$OUT/games/CashCowDX/patches"
-cp "$ROOT/dist/Scripts/CashCowDX.sh" "$ROOT/dist/Scripts/CashCowDX_CoresMenu.sh" "$OUT/Scripts/"
-cp "$ROOT/dist/games/CashCowDX/launch.sh" "$OUT/games/CashCowDX/"
+rm -rf "$OUT"; mkdir -p "$OUT/_Other" "$OUT/games/CashCowDX/patches"
+python3 "$PLAT/tools/mister_platform.py" render "$ROOT/mister-port.toml" --out "$OUT" --hook-binary "$HOOK_BIN"
 sed 's#/mister_patches\.gd"#/mister_patches.gdc"#' "$ROOT/dist/games/CashCowDX/override.cfg" > "$OUT/games/CashCowDX/override.cfg"
-cp "$WRAPPER" "$OUT/games/CashCowDX/MiSTer_CashCowDX"
 cp "$ROOT/dist/README.md" "$OUT/games/CashCowDX/README.md"
 cp "$ENGINE" "$OUT/games/CashCowDX/cashcowdx"
-cp "$ROOT/work/build/fabric_opt/libmisterfabric.so" "$OUT/games/CashCowDX/"
-cp "$ROOT"/tools/mem_wc/prebuilt/*.ko "$OUT/games/CashCowDX/"
+cp "${FABRIC_LIB:-$ROOT/work/build/fabric_opt/libmisterfabric.so}" "$OUT/games/CashCowDX/"
 TOK_HOST=${TOK_HOST:-root@192.168.20.81}
 TOK_PCK=${TOK_PCK:-/media/fat/games/CashCowDX/CashCowDX.pck}
 ssh "$TOK_HOST" 'rm -rf /tmp/cc_tok && mkdir -p /tmp/cc_tok/in /tmp/cc_tok/out'
@@ -42,8 +43,7 @@ ssh "$TOK_HOST" 'rm -rf /tmp/cc_tok'
 n_gd=$(ls "$ROOT"/src/patches/*.gd | wc -l); n_gdc=$(ls "$OUT"/games/CashCowDX/patches/*.gdc | wc -l)
 [ "$n_gd" -eq "$n_gdc" ] || { echo "tokenized $n_gdc of $n_gd patches"; exit 1; }
 cp "$RBF_SRC" "$OUT/_Other/CashCowDX_$(basename "$RBF_SRC" .rbf | grep -oE '[0-9]{8}$').rbf"
-chmod +x "$OUT/Scripts/CashCowDX.sh" "$OUT/Scripts/CashCowDX_CoresMenu.sh" "$OUT/games/CashCowDX/launch.sh" \
-	"$OUT/games/CashCowDX/MiSTer_CashCowDX" "$OUT/games/CashCowDX/cashcowdx"
+chmod +x "$OUT/games/CashCowDX/cashcowdx"
 # Checksums live inside the game folder: extracting over /media/fat must not
 # drop files into the SD root.
 ( cd "$OUT" && find . -type f ! -name sha256sums.txt | sort | xargs shasum -a 256 > games/CashCowDX/sha256sums.txt )

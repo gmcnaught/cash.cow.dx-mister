@@ -11,6 +11,8 @@ drawn by an FPGA blitter core. Audio and the joystick go through the core as wel
    - `_Other/CashCowDX_<date>.rbf` — the FPGA core (the shared Godot/GameMaker blitter core, branded CashCowDX)
    - `Scripts/CashCowDX.sh` — loads the core and starts the game
    - `Scripts/CashCowDX_CoresMenu.sh` — turns on starting the game from the core list (step 3)
+   - `_Other/CashCowDX.mgl` — a core-list entry that always loads the newest `CashCowDX_*.rbf`
+   - `linux/MiSTer_hybrid` and `linux/hybrid.d/CashCowDX.conf` — starts the game on core load (step 3)
    - `games/CashCowDX/` — the engine, its runtime, the launcher, this README and `sha256sums.txt`
      (verify the copy: FAT filesystems can silently truncate files on an interrupted copy)
 2. Copy **`CashCowDX.pck`** from your GOG install to `/media/fat/games/CashCowDX/CashCowDX.pck`.
@@ -18,15 +20,17 @@ drawn by an FPGA blitter core. Audio and the joystick go through the core as wel
      or the file next to the game executable in an installed copy.
    - The file this port was tested with has SHA-256 `4436b7509cab462f3efb1c56a0aba2997407ace231f6a16c35f4b1796d2d5b6c`.
 3. Run **Scripts → CashCowDX_CoresMenu** once. It adds a `[CashCowDX]` section to `/media/fat/MiSTer.ini`
-   (backed up first to `MiSTer.ini.bak.<time>`) with `main=/media/fat/games/CashCowDX/MiSTer_CashCowDX`.
+   (backed up first to `MiSTer.ini.bak.<time>`) with `main=/media/fat/linux/MiSTer_hybrid`.
    From then on, loading **CashCowDX** from the core list (`_Other`) starts the game. Run it again to turn this off.
    - `main=` is MiSTer's per-core setting for which MiSTer program runs while that core is loaded.
-     `MiSTer_CashCowDX` is the standard MiSTer program plus one addition that starts the game once the core is up;
+     `MiSTer_hybrid` is the standard MiSTer program plus one addition that starts the game once the core is up
+     (it reads `linux/hybrid.d/` and is shared with other ports that use the same platform);
      every other core keeps using your normal, updated `/media/fat/MiSTer`. No background service is installed.
 4. **Scripts → CashCowDX** also starts the game, with or without step 3.
 
-Upgrading from an earlier release: run **Scripts → CashCowDX** once. It removes the old `cashcowdx_daemon.sh` watcher
-(and its line in `linux/user-startup.sh`) and `_handler.sh`.
+Upgrading from an earlier release: run **Scripts → CashCowDX** once. It moves an existing `[CashCowDX] main=` line from
+`games/CashCowDX/MiSTer_CashCowDX` to `linux/MiSTer_hybrid` (backing up `MiSTer.ini`), deletes `MiSTer_CashCowDX`, and
+removes the old `cashcowdx_daemon.sh` watcher (and its line in `linux/user-startup.sh`) and `_handler.sh`.
 
 To quit, load another core from the OSD; the launcher stops the game when the core changes.
 
@@ -53,6 +57,7 @@ Unused R**. Default map on an unmapped pad: bottom face = Jump/OK, right face = 
 
 - Cash Cow DX © its developers; not distributed here.
 - This port: GPL-3.0, source at https://github.com/gmcnaught/cash.cow.dx-mister (see `LICENSING.md` there for exceptions).
-- `MiSTer_CashCowDX`: MiSTer-devel/Main_MiSTer (GPL-3.0) plus this port's hook.
+- `MiSTer_hybrid`: MiSTer-devel/Main_MiSTer (GPL-3.0) plus the mister-hybrid-platform hook
+  (https://github.com/gmcnaught/mister-hybrid-platform).
 - Godot Engine 4.3 (MIT) with MiSTer changes.
-- `mem_wc` driver: GPL-2.0, from skmp/minicast (source in the port's repository under `tools/mem_wc/`).
+- `mem_wc` driver: GPL-2.0, from skmp/minicast (source in mister-hybrid-platform under `device/mem_wc/`).
