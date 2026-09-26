@@ -6,7 +6,8 @@
 # Sources: mister-port.toml rendered by external/mister-hybrid-platform (launcher,
 # platform/, Scripts entries, hybrid.d registry entry, MGL, mem_wc modules and the
 # shared MiSTer_hybrid main= hook), dist/ (README, override.cfg), src/patches
-# (runtime GDScript patches), work/build/fabric_opt/libmisterfabric.so and the
+# (runtime GDScript patches), libmisterfabric.so (FABRIC_LIB, default
+# work/build/fabric_opt/libmisterfabric.so) and the
 # fabric core RBF.
 # The patches ship as binary tokens (.gdc): TOK_HOST (default the dev MiSTer)
 # runs the release engine once in MISTER_GD_TOKENIZE mode, so the token format
@@ -30,7 +31,7 @@ python3 "$PLAT/tools/mister_platform.py" render "$ROOT/mister-port.toml" --out "
 sed 's#/mister_patches\.gd"#/mister_patches.gdc"#' "$ROOT/dist/games/CashCowDX/override.cfg" > "$OUT/games/CashCowDX/override.cfg"
 cp "$ROOT/dist/README.md" "$OUT/games/CashCowDX/README.md"
 cp "$ENGINE" "$OUT/games/CashCowDX/cashcowdx"
-cp "$ROOT/work/build/fabric_opt/libmisterfabric.so" "$OUT/games/CashCowDX/"
+cp "${FABRIC_LIB:-$ROOT/work/build/fabric_opt/libmisterfabric.so}" "$OUT/games/CashCowDX/"
 TOK_HOST=${TOK_HOST:-root@192.168.20.81}
 TOK_PCK=${TOK_PCK:-/media/fat/games/CashCowDX/CashCowDX.pck}
 ssh "$TOK_HOST" 'rm -rf /tmp/cc_tok && mkdir -p /tmp/cc_tok/in /tmp/cc_tok/out'
