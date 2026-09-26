@@ -31,8 +31,9 @@ The full user guide (controls, where to find the `.pck`, logs, upgrading) is
  MiSTer core list ──load──▶ CashCowDX core (FPGA: blitter, scanout, audio, joystick words in DDR)
         │                                ▲
         ▼ MiSTer.ini [CashCowDX] main=   │ command ring + texture heap in DDR (0x3B000000)
- MiSTer_CashCowDX ──starts──▶ launch.sh ──▶ cashcowdx (Godot 4.3, Cortex-A9)
- (upstream Main_MiSTer + one hook)          canvas commands ─▶ libmisterfabric ─▶ blitter
+ MiSTer_hybrid ──starts──▶ launch.sh ──▶ cashcowdx (Godot 4.3, Cortex-A9)
+ (upstream Main_MiSTer + one hook;       canvas commands ─▶ libmisterfabric ─▶ blitter
+  reads linux/hybrid.d/CashCowDX.conf)
 ```
 
 - **Engine** (`scripts/apply_godot_mister.py`, `src/godot/`). Stock Godot 4.3 plus:
@@ -47,13 +48,16 @@ The full user guide (controls, where to find the `.pck`, logs, upgrading) is
 - **Runtime patches** (`src/patches/`): GDScript subclasses of a few of the game's scripts. They make its hottest per-tick
   code cheaper and pool frequently spawned effects. The game's `.pck` is not modified. The patches are loaded from
   `override.cfg` and ship as binary tokens (`.gdc`).
-- **Launcher** (`dist/games/CashCowDX/launch.sh`):
-  - keeps one engine at a time and loads the write-combining DDR driver (`tools/mem_wc/`);
+- **Launcher and device files** (`mister-port.toml`, rendered by the
+  [mister-hybrid-platform](https://github.com/gmcnaught/mister-hybrid-platform) submodule in `external/`):
+  - refuses to start unless the loaded core is CashCowDX with the `gm-fabric` DDR map;
+  - keeps one engine at a time and loads the write-combining DDR driver (`mem_wc`);
   - reserves CPU0 for the engine's main thread;
   - reloads the core if the blitter stalls at start-up;
   - stops the game when another core is loaded.
-- **Start on core load** (`tools/mister-wrapper/`): MiSTer's per-core `main=` setting runs `MiSTer_CashCowDX` while this
-  core is loaded. It is upstream Main_MiSTer plus one call that starts the launcher. There is no background daemon.
+- **Start on core load**: MiSTer's per-core `main=` setting runs the platform's shared `MiSTer_hybrid` while this
+  core is loaded. It is upstream Main_MiSTer plus one call that starts the launcher named in
+  `linux/hybrid.d/CashCowDX.conf`. There is no background daemon.
 
 [`PLAN.md`](PLAN.md) is the engineering record: findings, measurements and decisions, with the data behind each change.
 [`HANDOFF.md`](HANDOFF.md) is the short version: current state, decisions, layout and build.
@@ -86,8 +90,7 @@ docker run --rm -v "$PWD/work":/w godot4-armhf-build:bullseye sh -c \
 
 # 4. Blitter library, write-combining driver (for the device's kernel), start-on-core-load wrapper
 docker run --rm -v "$PWD":/p -w /p/src/fabric godot4-armhf-build:bullseye make OUT=../../work/build/fabric_opt
-tools/mem_wc/build.sh
-tools/mister-wrapper/build-hps.sh
+external/mister-hybrid-platform/device/main-hook/build-hps.sh   # MiSTer_hybrid (or take it from the platform CI artifact)
 
 # 5. Release zip -> build/release/CashCowDX-MiSTer-<tag>.zip
 #    RBF_SRC: the CashCowDX-branded fabric core (maldita.castilla-mister build-rbf.yml, core_variant=cashcow).
@@ -132,9 +135,9 @@ Engine feature switches for A/B runs (all on by default):
 | `src/godot/` | New engine files: MiSTer platform, fabric bridge, null GL, frame and boot logs |
 | `src/fabric/`, `src/vendor/` | `libmisterfabric` and the vendored mfgpu backend (local changes recorded in `src/vendor/VENDOR.md`) |
 | `src/patches/` | Runtime GDScript patches and their loader |
-| `dist/` | Launcher, Scripts-menu entries, `override.cfg`, user README |
-| `tools/mem_wc/` | Write-combining `/dev/mem` driver (GPL-2.0) and its kernel build |
-| `tools/mister-wrapper/` | Builds `MiSTer_CashCowDX` from pinned upstream Main_MiSTer |
+| `mister-port.toml` | Launcher and device-file manifest, rendered by the platform (`scripts/make_release.sh`) |
+| `dist/` | `override.cfg`, user README, `scripts-extra.sh` (upgrade clean-up rendered into the Scripts entry) |
+| `external/mister-hybrid-platform/` | Submodule: launcher library, `MiSTer_hybrid` hook, `mem_wc` driver, DDR-map spec |
 | `scripts/` | Release packaging and measurement harnesses |
 | `work/`, `build/`, `gamedata/` | Local build trees, captures and game files. Git-ignored and never committed |
 
@@ -142,7 +145,7 @@ Engine feature switches for A/B runs (all on by default):
 
 GPL-3.0, with per-path exceptions. See [`LICENSING.md`](LICENSING.md) and [`LICENSE`](LICENSE):
 - Godot engine files keep their MIT licence.
-- `tools/mem_wc/` is GPL-2.0.
+- `mem_wc` (in the platform submodule) is GPL-2.0.
 - The runtime patches subclass the game's own scripts, and the game's code is not licensed by this repository.
 
 Cash Cow DX and its assets are © their developers and are not part of this repository or its releases.

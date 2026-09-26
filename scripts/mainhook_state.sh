@@ -2,7 +2,7 @@
 # Device-side state for the main= hook test: which Main binary runs, how many
 # launchers/engines exist, whether the fabric retires work, old watchers.
 # Usage (host): ssh root@<mister> sh -s < scripts/mainhook_state.sh
-m=$(pidof MiSTer MiSTer_CashCowDX 2>/dev/null)
+m=$(pidof MiSTer MiSTer_hybrid 2>/dev/null)
 echo "CORENAME=$(cat /tmp/CORENAME)  main_pids=[$m]"
 for p in $m; do echo "  pid $p exe=$(readlink /proc/$p/exe)"; done
 echo "launch.sh: $(ps -o pid,args | grep -c '[C]ashCowDX/launch.sh')  engine(cashcowdx): $(pidof cashcowdx | wc -w)  other fabric engines: $(pidof gmloader frt_3.5.2 | wc -w)"
