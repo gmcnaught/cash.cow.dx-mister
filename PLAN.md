@@ -1149,7 +1149,7 @@ Human check (user, 2026-09-24): hardware tests of `20260924e` passed, including 
 ### 6.28 Launcher and main= hook moved to mister-hybrid-platform (2026-09-26)
 
 `dist/games/CashCowDX/launch.sh`, `dist/Scripts/*.sh`, `tools/mister-wrapper/` and `tools/mem_wc/` are replaced by the
-`external/mister-hybrid-platform` submodule (pinned `v0.2.0`) and `mister-port.toml`. `make_release.sh` renders the launcher
+`external/mister-hybrid-platform` submodule (pinned `v0.2.1`) and `mister-port.toml`. `make_release.sh` renders the launcher
 (`platform/launch_lib.sh`), both Scripts entries, `linux/hybrid.d/CashCowDX.conf`, `_Other/CashCowDX.mgl` and ships the shared
 `linux/MiSTer_hybrid` `main=` hook. `dist/scripts-extra.sh` keeps the older-release clean-up in the Scripts entry.
 
@@ -1168,8 +1168,8 @@ Boot time, interleaved warm A/B through `load_core` → MiSTer_hybrid (`scripts/
 |---|---|---|
 | old `launch.sh` (`ab_old3/4`) | 1.21 / 1.19 | 8.87 / 8.71 |
 | platform, first version (`ab_new1/2`) | 1.48 / 1.40 | 9.04 / 8.99 |
-| platform `v0.2.0` (`ab_new3/4`) | 1.07 / 1.08 | 8.72 / 8.74 |
+| platform `v0.2.0`+ (`ab_new3/4`) | 1.07 / 1.08 | 8.72 / 8.74 |
 
 The first version paid ~0.26 s in forks before the engine (4× `tr`, 5× `pidof`, a `$(…)` subshell, `awk`, `cat`; 10–25 ms each while
-MiSTer loads the core); `v0.2.0` uses builtins there. Not re-run: the stutter harness (§6.25); the launcher changes after engine start
+MiSTer loads the core); `v0.2.0` uses builtins there (`v0.2.1` only fixes CI tests). Not re-run: the stutter harness (§6.25); the launcher changes after engine start
 are the watchdog's `read` (no fork) and the exit-status fix.
