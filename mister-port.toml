@@ -1,8 +1,8 @@
 # Cash Cow DX device files, rendered by mister-hybrid-platform:
 #   python3 external/mister-hybrid-platform/tools/mister_platform.py render mister-port.toml --out <sd-root>
 # (scripts/make_release.sh does this). Generated: games/CashCowDX/launch.sh +
-# platform/, Scripts/CashCowDX{,_CoresMenu}.sh, linux/hybrid.d/CashCowDX.conf,
-# linux/MiSTer_hybrid, _Other/CashCowDX.mgl.
+# platform/ (incl. platform/MiSTer_hybrid and platform/hybrid.d/CashCowDX.conf),
+# Scripts/CashCowDX{,_CoresMenu}.sh, _Other/CashCowDX.mgl. Nothing under linux/.
 [port]
 name     = "CashCowDX"
 title    = "Cash Cow DX"
