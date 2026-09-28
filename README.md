@@ -33,7 +33,7 @@ The full user guide (controls, where to find the `.pck`, logs, upgrading) is
         ▼ MiSTer.ini [CashCowDX] main=   │ command ring + texture heap in DDR (0x3B000000)
  MiSTer_hybrid ──starts──▶ launch.sh ──▶ cashcowdx (Godot 4.3, Cortex-A9)
  (upstream Main_MiSTer + one hook;       canvas commands ─▶ libmisterfabric ─▶ blitter
-  reads linux/hybrid.d/CashCowDX.conf)
+  reads games/CashCowDX/platform/hybrid.d/CashCowDX.conf)
 ```
 
 - **Engine** (`scripts/apply_godot_mister.py`, `src/godot/`). Stock Godot 4.3 plus:
@@ -55,9 +55,9 @@ The full user guide (controls, where to find the `.pck`, logs, upgrading) is
   - reserves CPU0 for the engine's main thread;
   - reloads the core if the blitter stalls at start-up;
   - stops the game when another core is loaded.
-- **Start on core load**: MiSTer's per-core `main=` setting runs the platform's shared `MiSTer_hybrid` while this
-  core is loaded. It is upstream Main_MiSTer plus one call that starts the launcher named in
-  `linux/hybrid.d/CashCowDX.conf`. There is no background daemon.
+- **Start on core load**: MiSTer's per-core `main=` setting runs this port's copy of the platform's `MiSTer_hybrid`
+  (`games/CashCowDX/platform/MiSTer_hybrid`) while this core is loaded. It is upstream Main_MiSTer plus one call that starts the launcher named in
+  `games/CashCowDX/platform/hybrid.d/CashCowDX.conf`. There is no background daemon.
 
 [`PLAN.md`](PLAN.md) is the engineering record: findings, measurements and decisions, with the data behind each change.
 [`HANDOFF.md`](HANDOFF.md) is the short version: current state, decisions, layout and build.
@@ -95,6 +95,8 @@ external/mister-hybrid-platform/device/main-hook/build-hps.sh   # MiSTer_hybrid 
 # 5. Release zip -> build/release/CashCowDX-MiSTer-<tag>.zip
 #    RBF_SRC: the CashCowDX-branded fabric core (maldita.castilla-mister build-rbf.yml, core_variant=cashcow).
 #    TOK_HOST: a MiSTer with the game's .pck installed; the release engine tokenizes the patches there.
+#    TOK_GDC=<dir of .gdc> reuses tokens from an earlier build of the same engine instead (no device needed).
+#    The script fails if the zip has anything under linux/, screenshots/, savestates/ or downloader/.
 RBF_SRC=<path to the core .rbf> TOK_HOST=root@<mister> scripts/make_release.sh work/build/cashcowdx.cortexa9 <tag>
 ```
 

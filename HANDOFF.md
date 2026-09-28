@@ -13,9 +13,9 @@ Stutter target (≥58 displayed fps per second, ≤58 at most once per 30 s) mea
 Every canvas command type the game uses now reaches the fabric (rects, split large rects, polygons; `unhandled: none`).
 A release bundle (`scripts/make_release.sh`) ships a CashCowDX-branded core (`_Other/CashCowDX_*.rbf`, CORENAME `CashCowDX`, Cash Cow
 button labels). Loading it from the core list starts the game with no daemon: MiSTer.ini `[CashCowDX] main=` (set by
-**Scripts → CashCowDX_CoresMenu**) makes MiSTer exec the shared `MiSTer_hybrid` (upstream Main + one hook call, from the
+**Scripts → CashCowDX_CoresMenu**) makes MiSTer exec `games/CashCowDX/platform/MiSTer_hybrid` (upstream Main + one hook call, from the
 `external/mister-hybrid-platform` submodule) while this core is loaded; it starts the `launch.sh` named in
-`linux/hybrid.d/CashCowDX.conf`. `launch.sh`, the Scripts entries and the registry entry are rendered from `mister-port.toml`
+`games/CashCowDX/platform/hybrid.d/CashCowDX.conf` (platform v0.4.0; v0.3.x used `linux/`). `launch.sh`, the Scripts entries and the registry entry are rendered from `mister-port.toml`
 (PLAN §6.28). The user supplies the GOG `CashCowDX.pck` (PLAN §6.23, §6.24).
 Current release: `CashCowDX-MiSTer-20260924e` (engine `godot43pn`): core load → attract 8.75 s warm / 12.0 s cold (PLAN §6.26–6.27); human hardware check passed.
 

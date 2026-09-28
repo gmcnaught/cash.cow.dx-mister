@@ -12,25 +12,31 @@ drawn by an FPGA blitter core. Audio and the joystick go through the core as wel
    - `Scripts/CashCowDX.sh` — loads the core and starts the game
    - `Scripts/CashCowDX_CoresMenu.sh` — turns on starting the game from the core list (step 3)
    - `_Other/CashCowDX.mgl` — a core-list entry that always loads the newest `CashCowDX_*.rbf`
-   - `linux/MiSTer_hybrid` and `linux/hybrid.d/CashCowDX.conf` — starts the game on core load (step 3)
-   - `games/CashCowDX/` — the engine, its runtime, the launcher, this README and `sha256sums.txt`
+   - `games/CashCowDX/` — the engine, its runtime, the launcher, this README and `sha256sums.txt`;
+     `games/CashCowDX/platform/MiSTer_hybrid` and `games/CashCowDX/platform/hybrid.d/CashCowDX.conf` start the game
+     on core load (step 3)
      (verify the copy: FAT filesystems can silently truncate files on an interrupted copy)
 2. Copy **`CashCowDX.pck`** from your GOG install to `/media/fat/games/CashCowDX/CashCowDX.pck`.
    - GOG Linux installer: `data/noarch/game/CashCowDX.pck` inside the installer (e.g. extract with `innoextract`/`unzip`),
      or the file next to the game executable in an installed copy.
    - The file this port was tested with has SHA-256 `4436b7509cab462f3efb1c56a0aba2997407ace231f6a16c35f4b1796d2d5b6c`.
 3. Run **Scripts → CashCowDX_CoresMenu** once. It adds a `[CashCowDX]` section to `/media/fat/MiSTer.ini`
-   (backed up first to `MiSTer.ini.bak.<time>`) with `main=/media/fat/linux/MiSTer_hybrid`.
+   (backed up first to `MiSTer.ini.bak.<time>`) with `main=/media/fat/games/CashCowDX/platform/MiSTer_hybrid`.
    From then on, loading **CashCowDX** from the core list (`_Other`) starts the game. Run it again to turn this off.
    - `main=` is MiSTer's per-core setting for which MiSTer program runs while that core is loaded.
      `MiSTer_hybrid` is the standard MiSTer program plus one addition that starts the game once the core is up
-     (it reads `linux/hybrid.d/` and is shared with other ports that use the same platform);
+     (it reads `hybrid.d/` next to itself; each port that uses the platform has its own copy);
      every other core keeps using your normal, updated `/media/fat/MiSTer`. No background service is installed.
 4. **Scripts → CashCowDX** also starts the game, with or without step 3.
 
-Upgrading from an earlier release: run **Scripts → CashCowDX** once. It moves an existing `[CashCowDX] main=` line from
-`games/CashCowDX/MiSTer_CashCowDX` to `linux/MiSTer_hybrid` (backing up `MiSTer.ini`), deletes `MiSTer_CashCowDX`, and
-removes the old `cashcowdx_daemon.sh` watcher (and its line in `linux/user-startup.sh`) and `_handler.sh`.
+Upgrading from an earlier release: run **Scripts → CashCowDX** once (or run **Scripts → CashCowDX_CoresMenu** again).
+It moves an existing `[CashCowDX] main=` line to `/media/fat/games/CashCowDX/platform/MiSTer_hybrid` (backing up
+`MiSTer.ini`). Nothing is installed under `linux/` any more:
+- 20260926 with the core-list start turned on: `main=` moves off `/media/fat/linux/MiSTer_hybrid`, the old
+  `linux/hybrid.d/CashCowDX.conf` is removed, and `linux/MiSTer_hybrid` is deleted once no other `MiSTer.ini` section
+  uses it. Until you do this, the 20260926 hook keeps starting the game.
+- Older releases: it also deletes `games/CashCowDX/MiSTer_CashCowDX` and removes the old `cashcowdx_daemon.sh` watcher
+  (and its line in `linux/user-startup.sh`) and `_handler.sh`.
 
 To quit, load another core from the OSD; the launcher stops the game when the core changes.
 
