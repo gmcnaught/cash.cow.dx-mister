@@ -24,6 +24,13 @@ extends "res://objects/effect/effect_manager.gd"
 # @onready code that would need re-running.
 
 const POOL_MAX := 12
+# Stage 5's boss zipwires run through a line of 15 (left) / 12 (right) mega
+# gold at up to 320 px/s: a pickup every 3-4 ticks, and with the gold taken
+# after the eject 12 sparkles (0.6 s each) alive at once on the device
+# (scripts/zipride/, PLAN §6.29). Pre-warmed so the first ride of a level load
+# instantiates none mid-ride (a miss costs ~5.5 ms, PLAN §6.25). Happy hour
+# turns all gold mega, so the other stages' coin lines can reach it too.
+const MEGA_PREWARM := POOL_MAX
 
 var _pools := {} # PackedScene -> Array of parked effects.
 var _s0 := {} # PackedScene -> fresh-instance state (see _fx_new).
@@ -39,7 +46,7 @@ func _ready() -> void:
 		_pools[scene] = []
 	_prewarm(walk_effect, 3)
 	_prewarm(gold_pickup_effect, 6)
-	_prewarm(mega_gold_pickup_effect, 3)
+	_prewarm(mega_gold_pickup_effect, MEGA_PREWARM)
 	_prewarm(jump_effect_directional, 2)
 	_prewarm(jump_effect_static, 2)
 	_prewarm(drop_effect, 2)

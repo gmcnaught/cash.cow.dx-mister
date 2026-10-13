@@ -52,6 +52,8 @@ dist/                             games/CashCowDX/override.cfg, README.md, scrip
 external/mister-hybrid-platform/  submodule: launch_lib.sh, MiSTer_hybrid main= hook, mem_wc (source + prebuilt .ko), DDR-map spec
 scripts/make_release.sh           assembles build/release/CashCowDX-MiSTer-<tag>.zip (RBF_SRC=<cashcow-variant RBF> required)
 scripts/stutter/                  run.sh (device capture of the installed release), frames.py (analysis), state_probe.gd
+scripts/zipride/                  run.sh (device: stage 5 probes on the installed release), zip_probe.gd (boss zipwire rides),
+                                  scan_probe.gd (camera holds, per-node render attribution, light variants, screenshot parity), scan.py
 scripts/boot/                     boot_time.sh (device: core load -> attract timing, MISTER_BOOTLOG), boot_report.py, prof_phases.py, load_self.py
 scripts/ (measurement)            ab_play.sh, perf_stat_play.sh, spike_probe.gd, cpu_isolate.sh, soak.sh, joy_inject.py,
                                   tier0_probe.gd, godot_dbg_profile.py, profile_summary.py, sfx_bench.gd, gd_access_bench.gd,

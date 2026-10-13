@@ -15,7 +15,10 @@ extends "res://ui/pickup_score/pickup_score_manager.gd"
 # Reuse moves the popup to the last child so draw order stays newest-on-top.
 
 const POOL_MAX := 16
-const PREWARM := 8
+# Up to 13 popups (0.6-0.72 s each) are alive at once on a stage 5 boss
+# zipwire ride through the mega gold line and the gold after the eject
+# (scripts/zipride/, PLAN §6.29); 14 covers it with one spare.
+const PREWARM := 14
 
 var _free: Array = [] # Parked popups (pickup_score_pool.gd).
 var _size0 := Vector2(-1.0, -1.0) # Scene size of a fresh popup (32x8).

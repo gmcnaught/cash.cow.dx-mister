@@ -9,7 +9,7 @@ extends Node
 #    instantiate/queue_free per spawn. Pooled nodes are still instantiated
 #    from the original scenes, so they get their script swap (and VISUAL_TICK)
 #    here like any other node; parked ones are hidden and PROCESS_MODE_DISABLED.
-# MISTER_SEED=<n> seeds the global RNG (measurement runs). MISTER_PATCHES=0 disables all; MISTER_PATCHES_SKIP=gold,input,enemy,enemytick,playerdet,warp,visual,pool_score,pool_score_mgr,pool_fx,pool_fx_mgr skips some.
+# MISTER_SEED=<n> seeds the global RNG (measurement runs). MISTER_PATCHES=0 disables all; MISTER_PATCHES_SKIP=gold,input,enemy,enemytick,playerdet,warp,visual,pool_score,pool_score_mgr,pool_fx,pool_fx_mgr,disco skips some.
 
 const DEFAULT_DIR := "/media/fat/games/cashcow/patches/"
 var _dir := DEFAULT_DIR # MISTER_PATCHES_DIR overrides (A/B of patch versions).
@@ -25,6 +25,8 @@ const SCENE_PATCHES := {
 	"pool_fx": ["res://objects/effect/pickup_effect.gd", "effect_pool.gd",
 			"res://generic/delete_on_animation_end/delete_on_animation_end.gd", "effect_delete_pool.gd"],
 	"pool_fx_mgr": ["res://objects/effect/effect_manager.gd", "effect_manager_pool.gd"],
+	"disco": ["res://objects/disco/disco_lights.gd", "disco_lights_cone.gd",
+			"res://objects/disco_lights/disco_lights_game_clear_panel.gd", "disco_lights_clear_cone.gd"],
 }
 const INPUT_ORIG := "res://game_input/GameInput.gd"
 # Scripts whose _physics_process only drives visuals (checked: no writes to
