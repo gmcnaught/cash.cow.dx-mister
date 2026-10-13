@@ -1173,3 +1173,64 @@ Boot time, interleaved warm A/B through `load_core` → MiSTer_hybrid (`scripts/
 The first version paid ~0.26 s in forks before the engine (4× `tr`, 5× `pidof`, a `$(…)` subshell, `awk`, `cat`; 10–25 ms each while
 MiSTer loads the core); `v0.2.0` uses builtins there (`v0.2.1` only fixes CI tests). Not re-run: the stutter harness (§6.25); the launcher changes after engine start
 are the watchdog's `read` (no fork) and the exit-status fix.
+
+### 6.29 Stage 5 zipwire slowdown over the Party Pig: disco lights, pool pre-warm (2026-10-13)
+
+Report (a user): slowdown on the zipwire over the Party Pig (the boss, `enemies/boss` at x 704) in the final level, on the MiSTer.
+Repro on .81 (installed release, engine md5 `751f6a4e…`, patches from this tree's HEAD as `.gdc`): `scripts/zipride/run.sh` starts the
+release through its launcher with a probe autoload, `MISTER_FRAMELOG`, `MISTER_SEED=1`; `MISTER_PATCHES_DIR` A/Bs a patch set.
+`zip_probe.gd` loads stage 5 (`GameManager` reset + `emit_load_scene(LEVELS[4])`), keeps the player invincible from before the teleport
+(otherwise it is hurt on its first tick at the wire start and the ride ends), puts it on `zipwire_rig_left` / `_right`
+(`player_state_machine.change_state(player_zipwire_state)`) and logs the ride; stage 5 is reloaded before each of 6 rides, so every
+ride is the first after a level load. `scan_probe.gd` holds the camera at x positions, hides each top-level level node in turn, tries
+light variants, or freezes the lights for screenshots (`SHOTS=1`: run.sh sends `screenshot` to /dev/MiSTer_cmd per pose; a write to
+the FIFO from GDScript did nothing). `poly_probe.gd`: does a Polygon2D reach the bridge. Analysis: `scan.py` (per window), `rides.py`
+(per ride: scanout periods vs presented frames). Captures: `build/zipride/`.
+
+Findings (Observed):
+- Not the zipwire or its pickups at first: with no coins taken, frames were ~20 ms (13–35 two-step frames per ride) whenever the camera
+  showed x ~560–864, and normal elsewhere (`diag1`). Frame log split, same run: draw 16.96 ms / present 14.80 / CPU 19.85 near the boss
+  vs 9.90 / 7.84 / 9.73 at the spawn; physics and process unchanged. Present is the host spinning on C_DONE, i.e. blitter time.
+- Per-node attribution at x 704 (`scan1`, 60 frames each): all visible: present 21.9 ms, CPU 34.5, 57/60 two-step frames;
+  **`disco_lights` hidden: 7.6 / 9.2 / 0**; hiding any other node (mega gold, boss, loudspeakers, effects, background ...) changes nothing.
+- `disco_lights` = two 128x256 AnimatedSprite2Ds (`objects/disco/disco_lights.png`: 4 frames, each one flat colour in the same cone of
+  binary alpha, 49 row runs, 50 % of the quad), under `lights_left` / `_right`, which their AnimationPlayers keep rotating (left
+  -17°..0°, right 10°..19°), drawn behind the level art (mostly transparent there). Variants (`lights1`, `lights2`; present / CPU,
+  frames over 17.5 ms): ref 22.8 / 37.0, 60; rotation 0 (full quads) 7.2 / 9.7, 0; one light 11.1–15.5 / 17.9–25.2 (the right one,
+  rotated more, costs more); 220 px tall rotated (under the bridge's 224 px split) 22.8 / 36.8; rotated with the frame animation
+  stopped 20.4 / 33.3. So the cost is the rotated textured quad, not the split or the animation.
+- Correction: the "cone polygon" variant (7.4 / 9.6) was not a cheaper light: in this engine no Polygon2D reaches the fabric bridge
+  (`MISTER_FABRIC_STATS`: `poly=0` with the cones and with `poly_probe.gd`'s polygons on screen; the parity screenshot showed no lights).
+  Why polygons stopped arriving (§6.19 measured poly > 0 on `godot43pl`) is not checked; the engine tree is not in this checkout.
+- Pickups once riding (`rideA2`, release): 18–19 coins a ride (15 / 12 mega on the wire, then normal gold after the eject); 8–9
+  mega-gold sparkles and 4–5 "+N" popups instantiated mid-ride (pre-warm 3 / 8; peak 12 / 13 alive), 54–66 two-step frames and worst
+  frames of 46–64 ms (3 physics steps): the stage 5 counterpart of the Neo Geo port's l5b_fight ticks 463–486 (docs/NEO-PLAN.md N9 there).
+
+Unknown: why the fabric is slow on a rotated textured quad of this size (inferred, not measured: texture fetches crossing texture rows
+at the rotation angle). Other rotated sprites in the game were not surveyed.
+
+Fix (`src/patches/`):
+- `disco_lights_cone.gd` (stage 5) and `disco_lights_clear_cone.gd` (game clear panel, same layout), key `disco`: each light is drawn as
+  untextured rects, one per row run of the cone (49, each reaching 1 row into the next so the rotated T-junctions leave no snapped
+  gaps), in the frame's colour, by a Node2D at the sprite's place under the rotating `lights_*` node. Colours are the texels' RGB565
+  values expanded (the fabric shows texel 249 as 255 but a vertex colour 249 as 247). The AnimatedSprite2Ds stay in the tree hidden
+  (animation timing, random speeds unchanged); the runs node redraws on `frame_changed` / `animation_changed`. A frame outside the
+  table (atlas path, 128x256 region, column 0–3 checked) shows the sprite again.
+  Reference: the CPS2 / Neo Geo port pre-rotates the lights (0.5°, 54 angles; `src/main/l5b_gfx.c`, docs/M7-l5-boss.md there) because
+  that hardware cannot rotate; here the engine still rotates them and only the primitive changes.
+- `effect_manager_pool.gd`: `mega_gold_pickup_effect` pre-warm 3 -> 12 (`POOL_MAX`); `pickup_score_manager_pool.gd`: popups 8 -> 14.
+  Level-load frame unchanged within noise (`load_max_frame_us` 319–348 ms on reloads in both builds).
+
+Results (patched set copied to `/tmp/ccp`, same probes):
+- Pixels (`parA2` release vs `parE2` patched; lights frozen at 3 angle / frame poses, everything but the lights and the level art
+  hidden; rows 24–223): 156 / 179 / 190 pixels differ of 18,405 / 20,222 / 18,174 beam pixels, all beam colour vs black on the cone
+  edges; beam colours identical.
+- Camera held at x 704 (`holdD`): present 6.7 ms, CPU 10.2, 0/60 frames over (release `lights1` ref: 22.8 / 37.0, 60/60; lights
+  hidden on the same build: 7.4 / 9.5).
+- Rides (`rideB4`, 6 rides, 19 coins each): 0 sparkle / popup instantiations, **0 repeated scanout frames of 868**, CPU > 16.7 ms on
+  0–4 frames a ride, worst 16.0–19.9 ms. Release (`rideA2`): 69–75 repeated of 171–181 scanout frames a ride, CPU > 16.7 ms on 75–96,
+  worst 50–54 ms. Still instantiated mid-ride on both: walk dust (3, the zipwire's 0.12 s effect), directional jump (1–2), enemy
+  warnings (not pooled); no displayed-frame cost measured, so their pre-warm is unchanged. No script errors in the engine logs.
+- Not run: the game clear panel's lights on the device (needs a game finished; the patch loads with the level, no errors), the
+  stutter harness (§6.25) on the new patch set, a release build (`make_release.sh` tokenizes `src/patches/*.gd`, so the two new
+  files ship as `.gdc` with it). The installed release on .81 is unchanged; the test set is `/tmp/ccp` (tmpfs).
